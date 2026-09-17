@@ -369,9 +369,10 @@ func spfEvalRecord(ctx context.Context, domain, rec string, ip net.IP, lookups *
 // ── DNSBL ──────────────────────────────────────────────────────────────────────
 
 // dnsblKind 区分三类结果，混为一谈是大多数在线检测工具的通病：
-//   spam   真·垃圾源/被入侵主机，命中才是硬问题
-//   policy 策略列表（如 Spamhaus PBL），只在「直连对方 MX」时生效
-//   blocked 查询被拒（用了公共 DNS 或超过免费额度），结果不可信
+//
+//	spam   真·垃圾源/被入侵主机，命中才是硬问题
+//	policy 策略列表（如 Spamhaus PBL），只在「直连对方 MX」时生效
+//	blocked 查询被拒（用了公共 DNS 或超过免费额度），结果不可信
 const (
 	dnsblClean   = "clean"
 	dnsblSpam    = "spam"

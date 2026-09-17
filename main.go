@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -55,28 +55,28 @@ type Step struct {
 }
 
 type TLSCertInfo struct {
-	Subject    string   `json:"subject"`
-	Issuer     string   `json:"issuer"`
-	NotBefore  string   `json:"not_before"`
-	NotAfter   string   `json:"not_after"`
-	DaysLeft   int      `json:"days_left"`
-	SANs       []string `json:"sans"`
-	Protocol   string   `json:"protocol"`
-	Cipher     string   `json:"cipher"`
-	Valid      bool     `json:"valid"`
+	Subject   string   `json:"subject"`
+	Issuer    string   `json:"issuer"`
+	NotBefore string   `json:"not_before"`
+	NotAfter  string   `json:"not_after"`
+	DaysLeft  int      `json:"days_left"`
+	SANs      []string `json:"sans"`
+	Protocol  string   `json:"protocol"`
+	Cipher    string   `json:"cipher"`
+	Valid     bool     `json:"valid"`
 }
 
 type DNSResult struct {
-	MX        []string     `json:"mx"`
-	A         []string     `json:"a"`
-	AAAA      []string     `json:"aaaa"`
-	SPF       string       `json:"spf"`
-	SPFValid  *bool        `json:"spf_valid,omitempty"`
-	DKIM      []DKIMRecord `json:"dkim"`
-	DMARC     string       `json:"dmarc"`
-	DMARCPol  string       `json:"dmarc_policy"`
-	MXHosts   []string     `json:"mx_hosts,omitempty"`
-	Policy    *PolicyRecords `json:"policy,omitempty"`
+	MX       []string       `json:"mx"`
+	A        []string       `json:"a"`
+	AAAA     []string       `json:"aaaa"`
+	SPF      string         `json:"spf"`
+	SPFValid *bool          `json:"spf_valid,omitempty"`
+	DKIM     []DKIMRecord   `json:"dkim"`
+	DMARC    string         `json:"dmarc"`
+	DMARCPol string         `json:"dmarc_policy"`
+	MXHosts  []string       `json:"mx_hosts,omitempty"`
+	Policy   *PolicyRecords `json:"policy,omitempty"`
 }
 
 type DKIMRecord struct {
@@ -91,16 +91,16 @@ type SMTPExtension struct {
 }
 
 type TestResult struct {
-	Steps       []Step            `json:"steps"`
-	TotalMs     int64             `json:"total_ms"`
-	Summary     string            `json:"summary"`
-	DNS         map[string]*DNSResult `json:"dns"`
-	TLSCert     *TLSCertInfo      `json:"tls_cert,omitempty"`
-	Extensions  []SMTPExtension   `json:"extensions,omitempty"`
-	ServerIP    string            `json:"server_ip,omitempty"`
-	SPF         *SPFEval          `json:"spf_eval,omitempty"`
-	SendingIP   *SendingIPInfo    `json:"sending_ip,omitempty"`
-	DNSBL       []DNSBLResult     `json:"dnsbl,omitempty"`
+	Steps      []Step                `json:"steps"`
+	TotalMs    int64                 `json:"total_ms"`
+	Summary    string                `json:"summary"`
+	DNS        map[string]*DNSResult `json:"dns"`
+	TLSCert    *TLSCertInfo          `json:"tls_cert,omitempty"`
+	Extensions []SMTPExtension       `json:"extensions,omitempty"`
+	ServerIP   string                `json:"server_ip,omitempty"`
+	SPF        *SPFEval              `json:"spf_eval,omitempty"`
+	SendingIP  *SendingIPInfo        `json:"sending_ip,omitempty"`
+	DNSBL      []DNSBLResult         `json:"dnsbl,omitempty"`
 }
 
 type SSEEvent struct {
@@ -157,7 +157,8 @@ func qpEncode(s string) string {
 }
 
 func NewSMTPConn(host string, port int, useSSL bool, insecureTLS bool) (*SMTPConn, error) {
-	addr := fmt.Sprintf("%s:%d", host, port)
+	// 必须用 JoinHostPort：IPv6 字面量要加方括号，直接拼 "%s:%d" 会拼出非法地址
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	var conn net.Conn
 	var err error
 
@@ -651,7 +652,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		Detail:   fmt.Sprintf("Code %d (%dms)", code, bannerMs),
 		Response: bannerMsg,
 		Timing:   bannerMs,
-		Tips:     func() []string { if !bannerOk { return getErrorTips(lang, code, bannerMsg) } ; return nil }(),
+		Tips: func() []string {
+			if !bannerOk {
+				return getErrorTips(lang, code, bannerMsg)
+			}
+			return nil
+		}(),
 	})
 	if !bannerOk {
 		conn.Close()
@@ -671,7 +677,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		Detail:   fmt.Sprintf("Code %d (%dms)", ehloCode, ehloMs),
 		Response: ehloMsg,
 		Timing:   ehloMs,
-		Tips:     func() []string { if !ehloOk { return getErrorTips(lang, ehloCode, ehloMsg) } ; return nil }(),
+		Tips: func() []string {
+			if !ehloOk {
+				return getErrorTips(lang, ehloCode, ehloMsg)
+			}
+			return nil
+		}(),
 	})
 
 	// Parse extensions
@@ -696,13 +707,25 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 			emit(Step{
 				Name:   lang.T("STARTTLS 加密", "STARTTLS"),
 				Status: boolToStatus(tlsOk),
-				Detail: fmt.Sprintf("Code %d, TLS %s (%dms)", tlsCode, func() string { if tlsState != nil { return tls.VersionName(tlsState.Version) }; return "" }(), tlsMs),
+				Detail: fmt.Sprintf("Code %d, TLS %s (%dms)", tlsCode, func() string {
+					if tlsState != nil {
+						return tls.VersionName(tlsState.Version)
+					}
+					return ""
+				}(), tlsMs),
 				Response: func() string {
-					if tlsOk { return lang.T("TLS 握手成功", "TLS handshake succeeded") }
+					if tlsOk {
+						return lang.T("TLS 握手成功", "TLS handshake succeeded")
+					}
 					return lang.F("TLS 失败: %s", "TLS failed: %s", tlsErr)
 				}(),
 				Timing: tlsMs,
-				Tips:   func() []string { if !tlsOk { return []string{lang.T("TLS 握手失败，可能是证书不受信任或域名不匹配", "TLS handshake failed: the certificate may be untrusted or the hostname may not match."), lang.T("勾选「跳过 TLS 证书校验」后可继续测试链路", "Enable \"Skip TLS certificate verification\" to keep testing the path."), lang.T("或切换到 465 端口 (SSL)", "Or switch to port 465 (implicit SSL).")} } ; return nil }(),
+				Tips: func() []string {
+					if !tlsOk {
+						return []string{lang.T("TLS 握手失败，可能是证书不受信任或域名不匹配", "TLS handshake failed: the certificate may be untrusted or the hostname may not match."), lang.T("勾选「跳过 TLS 证书校验」后可继续测试链路", "Enable \"Skip TLS certificate verification\" to keep testing the path."), lang.T("或切换到 465 端口 (SSL)", "Or switch to port 465 (implicit SSL).")}
+					}
+					return nil
+				}(),
 			})
 			if tlsOk {
 				conn.SendCommand("EHLO " + getHostname())
@@ -759,7 +782,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 			Detail:   fmt.Sprintf("AUTH LOGIN, Code %d (%dms)", passCode, authMs),
 			Response: passMsg,
 			Timing:   authMs,
-			Tips:     func() []string { if !authOk { return getErrorTips(lang, passCode, passMsg) } ; return nil }(),
+			Tips: func() []string {
+				if !authOk {
+					return getErrorTips(lang, passCode, passMsg)
+				}
+				return nil
+			}(),
 		})
 		if !authOk {
 			conn.SendCommand("QUIT")
@@ -779,7 +807,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 			Detail:   fmt.Sprintf("AUTH PLAIN, Code %d (%dms)", plainCode, authMs),
 			Response: plainMsg,
 			Timing:   authMs,
-			Tips:     func() []string { if !authOk { return getErrorTips(lang, plainCode, plainMsg) } ; return nil }(),
+			Tips: func() []string {
+				if !authOk {
+					return getErrorTips(lang, plainCode, plainMsg)
+				}
+				return nil
+			}(),
 		})
 		if !authOk {
 			conn.SendCommand("QUIT")
@@ -801,7 +834,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		Detail:   fmt.Sprintf("<%s>, Code %d (%dms)", cfg.From, fromCode, fromMs),
 		Response: fromMsg,
 		Timing:   fromMs,
-		Tips:     func() []string { if !fromOk { return getErrorTips(lang, fromCode, fromMsg) } ; return nil }(),
+		Tips: func() []string {
+			if !fromOk {
+				return getErrorTips(lang, fromCode, fromMsg)
+			}
+			return nil
+		}(),
 	})
 
 	// ── Step 8: RCPT TO ──
@@ -815,7 +853,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		Detail:   fmt.Sprintf("<%s>, Code %d (%dms)", cfg.To, rcptCode, rcptMs),
 		Response: rcptMsg,
 		Timing:   rcptMs,
-		Tips:     func() []string { if !rcptOk { return getErrorTips(lang, rcptCode, rcptMsg) } ; return nil }(),
+		Tips: func() []string {
+			if !rcptOk {
+				return getErrorTips(lang, rcptCode, rcptMsg)
+			}
+			return nil
+		}(),
 	})
 	if !rcptOk {
 		conn.SendCommand("QUIT")
@@ -919,8 +962,8 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 			sendMs := time.Since(dataStart).Milliseconds()
 			sendOk := (sendErr == nil && sendCode == 250)
 			emit(Step{
-				Name:     lang.T("DATA (发送邮件)", "DATA (message body)"),
-				Status:   boolToStatus(sendOk),
+				Name:   lang.T("DATA (发送邮件)", "DATA (message body)"),
+				Status: boolToStatus(sendOk),
 				Detail: func() string {
 					if sendErr != nil {
 						return lang.F("等待服务器应答失败: %v (%dms)", "failed while waiting for the server reply: %v (%dms)", sendErr, sendMs)
@@ -992,7 +1035,6 @@ func getTCPErrorTips(lang L, err error, host string, port int) []string {
 }
 
 // ── HTTP Handlers ──────────────────────────────────────────────────────────────
-
 
 // indexHTML 是嵌入的页面字节。
 //
