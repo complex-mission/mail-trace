@@ -1,0 +1,1953 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mail Trace — 邮件发送链路诊断 | SMTP · SPF · DKIM · DMARC · PTR 一次测完</title>
+    <meta name="description" content="开源的邮件送达率诊断工具：真实跑一次 SMTP 会话，逐跳显示 DNS、TCP、TLS、认证、MAIL FROM、RCPT TO、DATA，并按 RFC 7208 完整求值 SPF、检查发信 IP 的 PTR/FCrDNS、区分 Spamhaus SBL 与 PBL 返回码。凭据不落盘、不记录。">
+    <meta name="keywords" content="SMTP 测试,邮件送达率,SPF 检测,DKIM,DMARC,PTR 反向解析,DNSBL,Spamhaus PBL,邮件进垃圾箱,mail deliverability,SMTP diagnostics">
+    <meta name="author" content="complex mission">
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+    <link rel="canonical" href="https://mail-trace.complexmission.com/">
+    <link rel="alternate" hreflang="zh-Hans" href="https://mail-trace.complexmission.com/?lang=zh">
+    <link rel="alternate" hreflang="en" href="https://mail-trace.complexmission.com/?lang=en">
+    <link rel="alternate" hreflang="x-default" href="https://mail-trace.complexmission.com/">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><defs><linearGradient id='g' x1='4' y1='8' x2='44' y2='42' gradientUnits='userSpaceOnUse'><stop stop-color='%235b9cf6'/><stop offset='0.55' stop-color='%238b7df6'/><stop offset='1' stop-color='%23d67df6'/></linearGradient></defs><rect x='1' y='1' width='46' height='46' rx='11' fill='%230f1420'/><rect x='6.5' y='16' width='27' height='22' rx='6' fill='none' stroke='url(%23g)' stroke-width='3'/><path d='M11.5 21.5 20 29l8.5-7.5 11-9' fill='none' stroke='url(%23g)' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/><circle cx='39.5' cy='12.5' r='4.2' fill='%230f1420' stroke='url(%23g)' stroke-width='3'/></svg>">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Mail Trace">
+    <meta property="og:url" content="https://mail-trace.complexmission.com/">
+    <meta property="og:title" content="Mail Trace — 邮件发送链路诊断">
+    <meta property="og:description" content="真实跑一次 SMTP 会话，逐跳定位邮件发不出去或进垃圾箱的原因。完整 SPF 求值、发信 IP 的 PTR 检查、Spamhaus 返回码分类。开源，凭据不落盘。">
+    <meta property="og:image" content="https://mail-trace.complexmission.com/og.svg">
+    <meta property="og:locale" content="zh_CN">
+    <meta property="og:locale:alternate" content="en_US">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Mail Trace — 邮件发送链路诊断">
+    <meta name="twitter:description" content="逐跳诊断 SMTP 投递链路：SPF 完整求值、PTR/FCrDNS、DNSBL 返回码分类。开源自建。">
+    <meta name="twitter:image" content="https://mail-trace.complexmission.com/og.svg">
+    <meta name="theme-color" content="#0f1420">
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Mail Trace",
+  "alternateName": "邮件链路诊断",
+  "url": "https://mail-trace.complexmission.com/",
+  "applicationCategory": "DeveloperApplication",
+  "applicationSubCategory": "Email deliverability diagnostics",
+  "operatingSystem": "Any (web browser)",
+  "description": "开源的邮件送达率诊断工具。真实建立一次 SMTP 会话逐跳定位问题，并提供无需凭据的 DNS 记录检测模式：按 RFC 7208 完整求值 SPF、检查发信 IP 的 PTR 与 FCrDNS、按返回码区分 DNSBL 的垃圾源列表与策略列表，并核对 Gmail、Yahoo、Microsoft 的发件人准入要求。",
+  "inLanguage": [
+    "zh-Hans",
+    "en"
+  ],
+  "isAccessibleForFree": true,
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "license": "https://opensource.org/licenses/MIT",
+  "codeRepository": "https://github.com/complex-mission/mail-trace",
+  "softwareHelp": "https://mail-trace.complexmission.com/llms.txt",
+  "featureList": [
+    "逐跳 SMTP 会话诊断：DNS、TCP、TLS/STARTTLS、AUTH、MAIL FROM、RCPT TO、DATA",
+    "SPF 完整求值（RFC 7208），递归展开 include/redirect/a/mx，统计 10 次查询上限",
+    "发信 IP 的 PTR 与 FCrDNS 检查",
+    "DNSBL 返回码分类：垃圾源列表、策略列表 PBL、查询被拒",
+    "DKIM 选择器探测与 DMARC 策略解析",
+    "MTA-STS、TLS-RPT、BIMI、DANE 检查",
+    "Gmail / Yahoo / Microsoft / 国内收件方准入要求核对",
+    "中英双语界面"
+  ],
+  "author": {
+    "@type": "Organization",
+    "name": "complex mission",
+    "url": "https://complexmission.com"
+  }
+}
+    </script>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "邮件进了垃圾箱，按什么顺序排查？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "按杀伤力排序：1) SPF 是否对实际发信 IP 通过——不是有没有 SPF 记录，而是这个 IP 在不在授权范围内；在 -all 策略下不通过等于直接被拒。2) 发信 IP 有没有 PTR 记录且正反解析一致。3) DKIM 是否签名并验签通过——转发场景下这是唯一还站得住的凭据。4) DMARC 对齐：SPF/DKIM 验证的域名要和 From 域名一致。5) IP 是否在垃圾源类黑名单（注意与 PBL 区分）。6) 内容与发送行为：新 IP 需要预热，短时间大量投递会触发限速。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "为什么我配了 SPF 还是失败？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "最常见三种：一是授权的是服务商但发信的是自己，比如 SPF 写 include:spf1.dm.aliyun.com 却从自建服务器直接发出，那台机器的 IP 不在服务商的 IP 段里；二是 include 嵌套太深超过 RFC 7208 规定的 10 次 DNS 查询上限，结果是 permerror，严格的收件方当作没有 SPF；三是邮件被转发过，转发会更换发信 IP，SPF 必然失败，这正是需要 DKIM 的原因。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Spamhaus 返回 127.0.0.11 是被拉黑了吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "不是。127.0.0.11 属于 PBL（Policy Block List，策略列表），含义是这个 IP 段被判定为终端或云主机通用段、不应直连对方 MX 发信，与有没有发过垃圾邮件无关，云服务器 IP 段默认基本都在里面。真正的垃圾源指控是 127.0.0.2 到 127.0.0.9（SBL/CSS/XBL）。而 127.255.255.x 表示查询被拒绝——通常是用了公共 DNS 或超出免费额度，此时结果无效，不代表被列入。PBL 只在你直连对方 MX 时生效；走服务商提交服务器投递时，提交机的 PBL 状态不影响投递。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "自建邮件服务器现实吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "技术上不难，难的是信誉。需要同时满足：出站 25 端口可用（中国大陆云厂商默认封禁且很少批准）、IP 有 PTR 且正反解析一致、IP 不在 PBL（云主机段默认在内，需单独申请移除）、IP 历史干净、以及 SPF + DKIM + DMARC 全部正确且对齐。任何一条不满足送达率都会塌。低量场景（验证码、通知）使用服务商的邮件推送服务通常更划算。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "4xx 和 5xx 退信有什么区别？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "4xx 是临时错误，发信方应当稍后重试，常见于灰名单、速率限制、对方暂时故障，重试几次通常能过；5xx 是永久错误，重试无意义，例如地址不存在、被策略拒绝、认证失败，必须修改配置或地址。常被误读的是 4xx 灰名单——首次投递被拒是正常设计，正规 MTA 会自动重试。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "不想输入邮箱密码，可以只检查 DNS 记录吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "可以。Mail Trace 的「仅查记录」模式只做 DNS 侧检查：MX、A、SPF（可对指定发信 IP 完整求值）、DKIM、DMARC、MTA-STS、TLS-RPT、BIMI、DANE、发信 IP 的 PTR 与 FCrDNS、以及多个 DNSBL，并据此核对 Gmail、Yahoo、Microsoft Outlook 与国内收件方的发件人准入要求。这个模式不需要任何凭据。"
+      }
+    }
+  ]
+}
+    </script>
+    <style>
+        :root {
+            --bg-0: #080b12;
+            --bg-1: #0f1420;
+            --bg-2: #171d2e;
+            --bg-3: #1e2740;
+            --border: #2a3550;
+            --text-0: #f0f4fc;
+            --text-1: #b0bcda;
+            --text-2: #6b7da0;
+            --accent: #5b9cf6;
+            --accent-2: #8b7df6;
+            --ok: #3dd68c;
+            --ok-bg: rgba(61,214,140,0.08);
+            --ok-border: rgba(61,214,140,0.25);
+            --fail: #f06868;
+            --fail-bg: rgba(240,104,104,0.08);
+            --fail-border: rgba(240,104,104,0.25);
+            --warn: #f0b868;
+            --warn-bg: rgba(240,184,104,0.08);
+            --warn-border: rgba(240,184,104,0.25);
+            --info: #5b9cf6;
+            --info-bg: rgba(91,156,246,0.08);
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg-0);
+            color: var(--text-0);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 940px;
+            margin: 0 auto;
+            padding: 46px 22px 88px;
+        }
+
+        /* ── Header ── */
+        .header {
+            position: relative;
+            text-align: center;
+            margin-bottom: 34px;
+        }
+        .brand {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }
+        .brand-logo { flex-shrink: 0; filter: drop-shadow(0 3px 10px rgba(139,125,246,.28)); }
+        .gh-link {
+            position: absolute; top: 0; left: 0;
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 7px 13px;
+            background: var(--bg-1); border: 1px solid var(--border); border-radius: 9px;
+            color: var(--text-2); text-decoration: none; font-size: 12px; font-weight: 500;
+            transition: all .15s;
+        }
+        .gh-link:hover { color: var(--text-0); border-color: var(--accent); }
+        .header .lede {
+            max-width: 680px; margin: 14px auto 0;
+            font-size: 0.83rem; line-height: 1.75; color: var(--text-2);
+        }
+        .header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            letter-spacing: -0.02em;
+            background: linear-gradient(135deg, #5b9cf6, #8b7df6, #d67df6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .header .sub {
+            color: var(--text-2);
+            margin-top: 6px;
+            font-size: 0.92rem;
+        }
+
+        /* ── Card ── */
+        .card {
+            background: var(--bg-1);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px 26px 26px;
+            margin-bottom: 18px;
+        }
+        .card-head {
+            display: flex;
+            align-items: center;
+            gap: 11px;
+            margin: 0 0 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: -0.005em;
+            color: var(--text-0);
+        }
+        .card-head .icon {
+            width: 30px;
+            height: 30px;
+            border-radius: 9px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        .icon-accent { background: var(--info-bg); color: var(--accent); box-shadow: inset 0 0 0 1px rgba(91,156,246,.18); }
+        .icon-ok     { background: var(--ok-bg);   color: var(--ok);     box-shadow: inset 0 0 0 1px rgba(61,214,140,.18); }
+
+        /* 内联图标：不参与基线对齐，避免行高抖动 */
+        .ico { display: block; flex-shrink: 0; }
+
+        /* ── Form ── */
+        .quick-fill {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            flex-wrap: wrap;
+            margin-bottom: 22px;
+        }
+        .preset-group {
+            font-size: 0.7rem; color: var(--text-2); text-transform: uppercase;
+            letter-spacing: .08em; font-weight: 600; margin-left: 4px;
+            padding-right: 2px; width: 100%;
+        }
+        .preset-group:first-child { margin-top: 0; }
+        .quick-fill .preset-group ~ .preset-group { margin-top: 6px; }
+        .preset-btn {
+            background: var(--bg-3);
+            color: var(--text-1);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 0.79rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .preset-btn:hover {
+            background: var(--bg-2);
+            border-color: var(--accent);
+            color: var(--text-0);
+        }
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px 18px;
+        }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.span-2 { grid-column: 1 / -1; }
+        label {
+            display: inline-flex;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--text-2);
+            margin-bottom: 6px;
+            font-weight: 500;
+            letter-spacing: .01em;
+            min-height: 20px;
+        }
+        input, select {
+            background: var(--bg-0);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            padding: 10px 13px;
+            color: var(--text-0);
+            font-size: 0.92rem;
+            transition: border-color 0.15s;
+            font-family: inherit;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(91,156,246,0.12);
+        }
+        input::placeholder { color: var(--text-2); opacity: 0.6; }
+
+        .btn-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .btn-primary {
+            flex: 1;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            background: linear-gradient(135deg, #5b9cf6, #8b7df6);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 12px 28px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .btn-primary:hover { opacity: 0.92; }
+        .btn-primary:active { transform: scale(0.98); }
+        .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+        .btn-secondary {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            background: var(--bg-3);
+            color: var(--text-1);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 18px;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-secondary:hover { border-color: var(--accent); color: var(--text-0); }
+
+        /* ── Toggle Switch ── */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px 14px;
+            margin-top: 14px;
+            padding: 13px 16px;
+            background: var(--bg-0);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+        }
+        .toggle-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+            flex-shrink: 0;
+        }
+        .toggle-label input { display: none; }
+        .toggle-switch {
+            position: relative;
+            width: 38px;
+            height: 20px;
+            background: var(--border);
+            border-radius: 10px;
+            transition: background 0.2s;
+        }
+        .toggle-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: var(--text-2);
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+        .toggle-label input:checked + .toggle-switch {
+            background: var(--accent);
+        }
+        .toggle-label input:checked + .toggle-switch::after {
+            left: 20px;
+            background: #fff;
+        }
+        .toggle-text { font-size: 0.88rem; font-weight: 500; color: var(--text-0); }
+        .toggle-hint { font-size: 0.78rem; color: var(--text-2); }
+
+        /* ── Pipeline / Steps ── */
+        .pipeline {
+            position: relative;
+            padding-left: 38px;
+        }
+        /* 竖线起止对齐首尾圆点的圆心（dot top 16 + 半径 11 = 27） */
+        .pipeline::before {
+            content: '';
+            position: absolute;
+            left: 10px;
+            top: 27px;
+            bottom: 27px;
+            width: 2px;
+            background: var(--border);
+            border-radius: 1px;
+        }
+        .step-node {
+            position: relative;
+            margin-bottom: 10px;
+            opacity: 0;
+            transform: translateY(10px);
+            animation: stepIn 0.35s ease forwards;
+        }
+        @keyframes stepIn {
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .step-dot {
+            position: absolute;
+            left: -38px;
+            top: 16px;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+            box-shadow: 0 0 0 4px var(--bg-1);
+        }
+        .step-dot.ok { background: var(--ok); color: #05150d; }
+        .step-dot.fail { background: var(--fail); color: #180505; }
+        .step-dot.warn { background: var(--warn); color: #181005; }
+        .step-dot.info { background: var(--info); color: #050e18; animation: dotPulse 1.2s ease-in-out infinite; }
+        @keyframes dotPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.85); }
+        }
+        .step-card {
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 15px 18px 16px;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .step-card:hover { border-color: #3a4a68; }
+        .step-card.fail-card { border-color: var(--fail-border); background: var(--fail-bg); }
+        .step-card.warn-card { border-color: var(--warn-border); background: var(--warn-bg); }
+        .step-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            min-height: 22px;
+        }
+        .step-name {
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+            font-weight: 600;
+            font-size: 0.92rem;
+            letter-spacing: -0.005em;
+            line-height: 1.35;
+        }
+        /* 耗时与状态各占固定宽度，保证所有卡片的徽章竖直成列 */
+        .step-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-shrink: 0;
+        }
+        .step-badge {
+            font-size: 0.68rem;
+            font-weight: 600;
+            padding: 3px 0;
+            border-radius: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            min-width: 52px;
+            text-align: center;
+        }
+        .badge-ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+        .badge-fail { background: var(--fail-bg); color: var(--fail); border: 1px solid var(--fail-border); }
+        .badge-warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+        .badge-info { background: var(--info-bg); color: var(--info); border: 1px solid rgba(91,156,246,0.25); }
+        .step-time {
+            display: inline-block;
+            min-width: 54px;
+            text-align: right;
+            font-size: 0.76rem;
+            color: var(--text-2);
+            font-variant-numeric: tabular-nums;
+        }
+        .step-detail {
+            color: var(--text-1);
+            font-size: 0.845rem;
+            line-height: 1.6;
+            margin-top: 6px;
+        }
+        .step-response-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-2);
+            font-size: 0.78rem;
+            margin-top: 8px;
+            cursor: pointer;
+            user-select: none;
+            transition: color 0.15s;
+        }
+        .step-response-toggle:hover { color: var(--accent); }
+        .step-response-toggle .ico { transition: transform 0.15s; }
+        .step-response {
+            background: var(--bg-0);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 10px 13px;
+            margin-top: 8px;
+            font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-size: 0.78rem;
+            color: var(--text-1);
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .step-response.show { display: block; }
+        .step-tips {
+            margin-top: 10px;
+            padding: 10px 14px;
+            background: rgba(240,184,104,0.05);
+            border: 1px solid rgba(240,184,104,0.15);
+            border-radius: 8px;
+        }
+        .step-tips-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--warn);
+            margin-bottom: 7px;
+        }
+        .step-tips ul {
+            list-style: none;
+            padding: 0;
+        }
+        .step-tips li {
+            font-size: 0.8rem;
+            line-height: 1.65;
+            color: var(--text-1);
+            padding: 3px 0 3px 17px;
+            position: relative;
+        }
+        .step-tips li::before {
+            content: '';
+            position: absolute;
+            left: 2px;
+            top: 11px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--warn);
+            opacity: 0.5;
+        }
+
+        /* ── Summary ── */
+        .summary-box {
+            text-align: center;
+            padding: 16px 20px;
+            border-radius: 11px;
+            font-weight: 600;
+            font-size: 0.95rem;
+            line-height: 1.6;
+            margin-top: 22px;
+        }
+        .summary-box.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-border); }
+        .summary-box.fail { background: var(--fail-bg); color: var(--fail); border: 1px solid var(--fail-border); }
+
+        /* ── DNS Section ── */
+        .dns-block { margin-bottom: 26px; }
+        .dns-block:last-child { margin-bottom: 0; }
+        .dns-domain-header {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            font-weight: 600;
+            font-size: 0.92rem;
+            color: var(--accent);
+            margin-bottom: 2px;
+        }
+        .dns-row {
+            display: grid;
+            grid-template-columns: 148px minmax(0, 1fr) 22px;
+            gap: 4px 16px;
+            align-items: start;
+            padding: 8px 0;
+            font-size: 0.845rem;
+            line-height: 1.6;
+            border-bottom: 1px solid rgba(42,53,80,.45);
+        }
+        .dns-row:last-child { border-bottom: none; }
+        .dns-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 1px;
+            color: var(--text-2);
+            font-weight: 500;
+        }
+        .dns-value { color: var(--text-0); word-break: break-word; white-space: pre-line; }
+        .dns-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 22px;
+            height: 22px;
+            border-radius: 6px;
+            margin-top: -1px;
+        }
+        .dns-status.pass { background: var(--ok-bg); color: var(--ok); }
+        .dns-status.miss { background: var(--fail-bg); color: var(--fail); }
+        .dns-status.na { background: rgba(107,125,160,0.12); color: var(--text-2); }
+
+        /* ── Extensions ── */
+        .ext-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+        .ext-chip {
+            background: var(--bg-3);
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            font-family: 'JetBrains Mono', 'SF Mono', monospace;
+            color: var(--text-1);
+        }
+        .ext-chip.known { border-color: rgba(91,156,246,0.3); color: var(--accent); }
+
+        /* ── TLS Cert ── */
+        .cert-grid {
+            display: grid;
+            grid-template-columns: 100px 1fr;
+            gap: 6px 14px;
+            font-size: 0.85rem;
+        }
+        .cert-label { color: var(--text-2); }
+        .cert-value { color: var(--text-0); word-break: break-all; }
+        .cert-warn { color: var(--warn); font-weight: 600; }
+        .cert-ok { color: var(--ok); font-weight: 600; }
+
+        /* ── Timer ── */
+        .timer-bar {
+            text-align: center;
+            padding: 10px;
+            font-size: 0.85rem;
+            color: var(--text-2);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ── Loading ── */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .pulse {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 0.88rem;
+            color: var(--text-0);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.25s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+
+        /* ── Hidden ── */
+        .hidden { display: none !important; }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        /* ── Responsive ── */
+        @media (max-width: 640px) {
+            .container { padding: 24px 14px 60px; }
+            .header h1 { font-size: 1.6rem; }
+            .form-grid { grid-template-columns: 1fr; }
+            .dns-row { grid-template-columns: 100px 1fr; }
+            .dns-status { grid-column: 2; }
+            .btn-row { flex-direction: column; }
+        }
+
+        /* ── 语言切换 ── */
+        .lang-switch { position:absolute; top:0; right:0; display:flex; align-items:center; gap:2px;
+            background:var(--bg-1); border:1px solid var(--border); border-radius:9px; padding:3px 3px 3px 9px; }
+        .lang-switch .lang-ico { color:var(--text-2); margin-right:5px; }
+        .lang-switch button { background:none; border:none; color:var(--text-2); cursor:pointer;
+            font-size:12px; padding:4px 10px; border-radius:6px; font-family:inherit; transition:all .15s; }
+        .lang-switch button:hover { color:var(--text-0); }
+        .lang-switch button.active { background:var(--accent); color:#fff; }
+
+        /* ── 问号提示 ── */
+        .hint-btn { display:inline-flex; align-items:center; justify-content:center;
+            width:20px; height:20px; padding:0; margin-left:3px; border:none; border-radius:6px;
+            background:transparent; color:var(--text-2); cursor:pointer; flex-shrink:0;
+            opacity:.55; transition:opacity .15s, color .15s, background .15s; }
+        .hint-btn:hover { opacity:1; color:var(--accent); background:var(--info-bg); }
+        .hint-pop { position:fixed; z-index:9999; max-width:min(420px, calc(100vw - 32px));
+            background:var(--card); border:1px solid var(--border); border-radius:10px;
+            padding:12px 14px; box-shadow:0 8px 32px rgba(0,0,0,.45); font-size:12.5px;
+            line-height:1.65; color:var(--text); display:none; }
+        .hint-pop.show { display:block; }
+        .hint-pop h4 { margin:0 0 6px; font-size:13px; color:var(--accent); }
+        .hint-pop p { margin:0 0 6px; }
+        .hint-pop code { background:var(--info-bg); padding:1px 5px; border-radius:4px; font-size:11.5px; }
+        .hint-pop .close { float:right; display:inline-flex; align-items:center; justify-content:center;
+            width:22px; height:22px; padding:0; border:none; border-radius:6px; background:transparent;
+            color:var(--text-2); cursor:pointer; margin:-2px -4px 0 8px; }
+        .hint-pop .close:hover { background:var(--bg-3); color:var(--text-0); }
+
+        /* ── 角色标记 ── */
+        .role-badge { display:inline-block; font-size:10px; padding:2px 8px; border-radius:20px;
+            font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+        .role-send { background:var(--info-bg); color:var(--accent); }
+        .role-recv { background:rgba(148,163,184,.15); color:var(--muted); }
+        .dns-note { font-size:11.5px; color:var(--text-2); padding:0 0 10px; line-height:1.6;
+            margin-bottom:4px; border-bottom:1px solid var(--border); }
+
+        /* ── 声明 / 科普 ── */
+        .notice-box { border:1px solid rgba(91,156,246,.22); background:var(--info-bg);
+            border-radius:11px; padding:13px 16px; font-size:12.5px; line-height:1.75;
+            color:var(--text-1); margin-top:18px; }
+        .notice-box strong, .notice-box b { color:var(--text-0); font-weight:600; }
+        .kb-item { border-bottom:1px solid var(--border); }
+        .kb-item:last-child { border-bottom:none; }
+        .kb-q { padding:14px 2px; cursor:pointer; display:flex; justify-content:space-between;
+            align-items:center; font-size:13.5px; color:var(--text-0); gap:14px; line-height:1.5; }
+        .kb-q:hover { color:var(--accent); }
+        .kb-q .chev { display:inline-flex; color:var(--text-2); flex-shrink:0; }
+        .kb-a { display:none; padding:0 2px 16px; font-size:12.5px; line-height:1.85; color:var(--text-1); }
+        .kb-a p { margin:0 0 8px; }
+        .kb-a li { margin:3px 0; }
+        .kb-a.show { display:block; }
+        .kb-a code { background:var(--info-bg); padding:1px 5px; border-radius:4px; font-size:11.5px; }
+        .kb-a a, .notice-box a { color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(91,156,246,.35); }
+        .kb-a a:hover, .notice-box a:hover { border-bottom-color:var(--accent); }
+        .kb-a ul { margin:6px 0 6px 18px; }
+        .kb-a table { width:100%; border-collapse:collapse; margin:8px 0; font-size:11.5px; }
+        .kb-a th, .kb-a td { border:1px solid var(--border); padding:5px 8px; text-align:left; }
+        .kb-a th { background:var(--info-bg); color:var(--text); font-weight:500; }
+
+        @media (max-width: 720px) {
+            .container { padding: 28px 16px 64px; }
+            .card { padding: 20px 18px 22px; border-radius: 14px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .header { margin-bottom: 40px; padding-top: 46px; }
+            .gh-link { top: 0; left: 50%; transform: translateX(-100%) translateX(-5px); }
+            .lang-switch { top: 0; right: 50%; transform: translateX(100%) translateX(5px); }
+            .brand-logo { width: 32px; height: 32px; }
+            .header h1 { font-size: 1.75rem; }
+            .dns-row { grid-template-columns: 1fr 22px; gap: 2px 12px; }
+            .dns-label { grid-column: 1; }
+            .dns-value { grid-column: 1; }
+            .dns-status { grid-column: 2; grid-row: 1 / span 2; }
+            .pipeline { padding-left: 30px; }
+            .step-dot { left: -30px; width: 20px; height: 20px; }
+            .pipeline::before { left: 9px; }
+        }
+
+        /* ── 模式切换 ── */
+        .mode-tabs {
+            display: inline-flex; gap: 3px; padding: 3px; margin-bottom: 10px;
+            background: var(--bg-0); border: 1px solid var(--border); border-radius: 11px;
+        }
+        .mode-tab {
+            display: inline-flex; align-items: center; gap: 7px;
+            padding: 8px 16px; border: none; border-radius: 8px;
+            background: transparent; color: var(--text-2); cursor: pointer;
+            font-family: inherit; font-size: 0.85rem; font-weight: 500; transition: all .15s;
+        }
+        .mode-tab:hover { color: var(--text-1); }
+        .mode-tab.active { background: var(--bg-3); color: var(--text-0); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+        .mode-tab.active .ico { color: var(--accent); }
+        .mode-hint { font-size: 0.79rem; color: var(--text-2); line-height: 1.65; margin: 0 0 20px; }
+
+        /* ── 准入检查 ── */
+        .rcv { border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px; overflow: hidden; }
+        .rcv:last-child { margin-bottom: 0; }
+        .rcv-head {
+            display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+            padding: 13px 16px; background: var(--bg-2);
+            font-size: 0.9rem; font-weight: 600; color: var(--text-0);
+        }
+        .rcv-verdict {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 0.68rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+            padding: 3px 9px; border-radius: 5px; margin-left: auto;
+        }
+        .rcv-verdict.ok   { background: var(--ok-bg);   color: var(--ok);   border: 1px solid var(--ok-border); }
+        .rcv-verdict.warn { background: var(--warn-bg); color: var(--warn); border: 1px solid var(--warn-border); }
+        .rcv-verdict.fail { background: var(--fail-bg); color: var(--fail); border: 1px solid var(--fail-border); }
+        .rcv-note { padding: 11px 16px 4px; font-size: 0.775rem; line-height: 1.7; color: var(--text-2); }
+        .rcv-list { padding: 6px 16px 14px; }
+        .rcv-item {
+            display: grid; grid-template-columns: 22px 186px minmax(0,1fr);
+            gap: 4px 12px; align-items: start; padding: 7px 0;
+            border-bottom: 1px solid rgba(42,53,80,.45); font-size: 0.83rem;
+        }
+        .rcv-item:last-child { border-bottom: none; }
+        .rcv-ico {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 22px; height: 22px; border-radius: 6px; margin-top: -1px;
+        }
+        .rcv-ico.ok { background: var(--ok-bg); color: var(--ok); }
+        .rcv-ico.fail { background: var(--fail-bg); color: var(--fail); }
+        .rcv-ico.warn { background: var(--warn-bg); color: var(--warn); }
+        .rcv-ico.na { background: rgba(107,125,160,.12); color: var(--text-2); }
+        .rcv-label {
+            color: var(--text-0); font-weight: 500;
+            display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; line-height: 1.5;
+        }
+        .rcv-req {
+            flex-shrink: 0; white-space: nowrap;
+            font-size: 0.62rem; letter-spacing: .05em; text-transform: uppercase;
+            padding: 1px 6px; border-radius: 4px; font-weight: 600;
+            background: rgba(107,125,160,.14); color: var(--text-2);
+        }
+        .rcv-detail { color: var(--text-1); line-height: 1.65; }
+        @media (max-width: 720px) {
+            .rcv-item { grid-template-columns: 22px minmax(0,1fr); }
+            .rcv-detail { grid-column: 2; }
+            .mode-tabs { display: flex; width: 100%; }
+            .mode-tab { flex: 1; justify-content: center; padding: 9px 8px; font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <a class="gh-link" href="https://github.com/complex-mission/mail-trace" target="_blank" rel="noopener">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.05-.02-2.06-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.33-1.76-1.33-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.241.07 1.83 2.81 1.3 3.5.99.11-.78.42-1.3.76-1.6-2.67-.3-5.47-1.34-5.47-5.95 0-1.32.47-2.39 1.24-3.23-.12-.31-.54-1.53.12-3.18 0 0 1.01-.32 3.3 1.23a11.5 11.5 0 0 1 6.01 0c2.29-1.55 3.3-1.23 3.3-1.23.66 1.65.24 2.87.12 3.18.77.84 1.24 1.91 1.24 3.23 0 4.62-2.81 5.64-5.49 5.94.43.37.82 1.1.82 2.220 1.6-.02 2.89-.02 3.29 0 .32.22.7.83.58A12.01 12.01 0 0 0 24 12.5C24 5.87 18.63.5 12 .5Z"/></svg><span>GitHub</span>
+            </a>
+            <div class="lang-switch">
+                <svg class="ico lang-ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/></svg>
+                <button id="langZh" class="active" onclick="setLang('zh')">中文</button>
+                <button id="langEn" onclick="setLang('en')">EN</button>
+            </div>
+            <div class="brand">
+                <svg class="brand-logo" viewBox="0 0 48 48" width="38" height="38" fill="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="mtGrad" x1="4" y1="8" x2="44" y2="42" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5b9cf6"/><stop offset="0.55" stop-color="#8b7df6"/><stop offset="1" stop-color="#d67df6"/>
+    </linearGradient>
+    <linearGradient id="mtFill" x1="5" y1="14" x2="36" y2="39" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5b9cf6" stop-opacity="0.20"/><stop offset="1" stop-color="#8b7df6" stop-opacity="0.07"/>
+    </linearGradient>
+  </defs>
+  <rect x="5.3" y="14.3" width="30.4" height="24.4" rx="6.5" fill="url(#mtFill)"/>
+  <rect x="5.3" y="14.3" width="30.4" height="24.4" rx="6.5" stroke="url(#mtGrad)" stroke-width="2.6"/>
+  <path d="M11 20.4 20.5 28.6 30 20.4 41.2 10.8" stroke="url(#mtGrad)" stroke-width="2.6"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="20.5" cy="28.6" r="2.2" fill="url(#mtGrad)"/>
+  <circle cx="41.2" cy="10.8" r="4.1" fill="#0f1420" stroke="url(#mtGrad)" stroke-width="2.6"/>
+</svg>
+                <h1>Mail Trace</h1>
+            </div>
+            <p class="sub" data-i18n="sub">邮件发送全链路诊断 — 探测每个环节的问题</p>
+            <p class="lede" data-i18n="lede">Mail Trace 是一个开源的邮件送达率诊断工具：它真实建立一次 SMTP 会话，逐跳记录 DNS、TCP、TLS、认证与投递，并完整求值 SPF、检查发信 IP 的反向解析、区分 DNSBL 返回码的含义。账号密码不落盘、不记录、不转发。</p>
+        </div>
+
+        <!-- Config Card -->
+        <div class="card">
+            <div class="card-head">
+                <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg></div>
+                <span id="cfgTitle">DNS 记录检测</span>
+            </div>
+            <div class="mode-tabs" role="tablist">
+                <button class="mode-tab active" id="tabRecords" role="tab" onclick="setMode('records')">
+                    <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+                    <span data-i18n="modeRecords">仅查记录</span>
+                </button>
+                <button class="mode-tab" id="tabFull" role="tab" onclick="setMode('full')">
+                    <svg class="ico" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
+                    <span data-i18n="modeFull">完整链路诊断</span>
+                </button>
+            </div>
+            <p class="mode-hint" id="modeHint"></p>
+
+            <div id="recordsPane">
+                <div class="form-grid">
+                    <div class="form-group span-2">
+                        <label><span data-i18n="lblDomain">域名</span></label>
+                        <input type="text" id="rDomain" data-ph="phDomain" placeholder="example.com（也可直接粘贴邮箱地址）">
+                    </div>
+                    <div class="form-group">
+                        <label><span data-i18n="lblSendIP">发信 IP（可选）</span><button type="button" class="hint-btn" aria-label="?" onclick="showHint(event,'submission')"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button></label>
+                        <input type="text" id="rIP" data-ph="phSendIP" placeholder="203.0.113.10 — 填了才能判定 SPF/PTR">
+                    </div>
+                    <div class="form-group">
+                        <label><span data-i18n="lblSelectors">DKIM 选择器（可选）</span><button type="button" class="hint-btn" aria-label="?" onclick="showHint(event,'dkim')"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button></label>
+                        <input type="text" id="rSel" data-ph="phSelectors" placeholder="s1, google — 逗号分隔">
+                    </div>
+                </div>
+                <div class="btn-row">
+                    <button class="btn-primary" id="recBtn" onclick="runRecords()"><span data-i18n="btnRecords">检测 DNS 记录</span></button>
+                </div>
+            </div>
+
+            <div id="fullPane" class="hidden">
+            <div class="quick-fill">
+                <span class="preset-group" data-i18n="psgMail">邮箱服务</span>
+                <button class="preset-btn" onclick="fill('gmail')">Gmail</button>
+                <button class="preset-btn" onclick="fill('m365')">Microsoft 365</button>
+                <button class="preset-btn" onclick="fill('yahoo')">Yahoo</button>
+                <button class="preset-btn" onclick="fill('icloud')">iCloud</button>
+                <button class="preset-btn" onclick="fill('zoho')">Zoho</button>
+                <button class="preset-btn" onclick="fill('fastmail')">Fastmail</button>
+                <button class="preset-btn" onclick="fill('yandex')">Yandex</button>
+                <span class="preset-group" data-i18n="psgEsp">投递服务</span>
+                <button class="preset-btn" onclick="fill('ses')">Amazon SES</button>
+                <button class="preset-btn" onclick="fill('sendgrid')">SendGrid</button>
+                <button class="preset-btn" onclick="fill('mailgun')">Mailgun</button>
+                <button class="preset-btn" onclick="fill('postmark')">Postmark</button>
+                <button class="preset-btn" onclick="fill('brevo')">Brevo</button>
+                <span class="preset-group" data-i18n="psgRegion">区域服务商</span>
+                <button class="preset-btn" onclick="fill('exmail')">Tencent ExMail</button>
+                <button class="preset-btn" onclick="fill('163')">NetEase 163</button>
+                <button class="preset-btn" onclick="fill('aliyun')">Alibaba Mail</button>
+                <button class="preset-btn" onclick="fill('aliyundm')">Alibaba DirectMail</button>
+                <button class="preset-btn" onclick="fill('naver')">Naver</button>
+                <button class="preset-btn" onclick="fill('xserver')">Xserver</button>
+            </div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label data-i18n="lblHost">SMTP 服务器</label>
+                    <input type="text" id="host" placeholder="smtp.example.com">
+                </div>
+                <div class="form-group">
+                    <label><span data-i18n="lblPort">端口</span><button type="button" class="hint-btn" aria-label="?" onclick="showHint(event,'ports')"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button></label>
+                    <select id="port">
+                        <option value="587" data-i18n="opt587">587 — STARTTLS（推荐）</option>
+                        <option value="465" data-i18n="opt465">465 — SSL/TLS</option>
+                        <option value="25" data-i18n="opt25">25 — 明文（不推荐）</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label data-i18n="lblUser">用户名</label>
+                    <input type="text" id="username" placeholder="user@example.com">
+                </div>
+                <div class="form-group">
+                    <label data-i18n="lblPass">密码</label>
+                    <input type="password" id="password" autocomplete="off" data-ph="phPass" placeholder="应用专用密码或邮箱密码">
+                </div>
+                <div class="form-group">
+                    <label data-i18n="lblFrom">发件人地址</label>
+                    <input type="text" id="from" placeholder="sender@example.com">
+                </div>
+                <div class="form-group">
+                    <label data-i18n="lblTo">收件人地址</label>
+                    <input type="text" id="to" placeholder="receiver@example.com">
+                </div>
+            </div>
+            <div class="toggle-row">
+                <label class="toggle-label">
+                    <input type="checkbox" id="dryRun" checked>
+                    <span class="toggle-switch"></span>
+                    <span class="toggle-text" data-i18n="tgDry">仅检测，不发送邮件</span>
+                </label>
+                <span class="toggle-hint" data-i18n="tgDryHint">勾选后在 DATA 步骤前自动 RSET，测试完整链路但不实际投递</span>
+            </div>
+            <div class="toggle-row">
+                <label class="toggle-label">
+                    <input type="checkbox" id="insecureTLS">
+                    <span class="toggle-switch"></span>
+                    <span class="toggle-text" data-i18n="tgTls">跳过 TLS 证书校验</span>
+                </label>
+                <span class="toggle-hint" data-i18n="tgTlsHint">当 TLS 握手因证书问题失败时勾选，可继续测试链路连通性</span>
+            </div>
+            <div class="notice-box" id="credNotice"></div>
+            <div class="btn-row">
+                <button class="btn-primary" id="testBtn" onclick="runTest()">
+                    <span data-i18n="btnRun">开始诊断</span>
+                </button>
+            </div>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div id="resultsArea" class="hidden">
+            <!-- Steps Pipeline -->
+            <div class="card">
+                <div class="card-head">
+                    <div class="icon icon-ok"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></div>
+                    <span data-i18n="cardSteps">诊断步骤</span>
+                </div>
+                <div class="timer-bar" id="timer"></div>
+                <div class="pipeline" id="pipeline"></div>
+                <div id="summary"></div>
+            </div>
+
+            <!-- TLS Certificate -->
+            <div class="card hidden" id="tlsCard">
+                <div class="card-head">
+                    <div class="icon icon-ok"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+                    <span data-i18n="cardTls">TLS 证书信息</span>
+                </div>
+                <div id="tlsContent"></div>
+            </div>
+
+            <!-- SMTP Extensions -->
+            <div class="card hidden" id="extCard">
+                <div class="card-head">
+                    <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg></div>
+                    <span data-i18n="cardExt">服务器扩展能力 (EHLO)</span>
+                </div>
+                <div id="extContent"></div>
+            </div>
+
+            <!-- DNS Records -->
+            <div class="card hidden" id="dnsCard">
+                <div class="card-head">
+                    <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg></div>
+                    <span data-i18n="cardDns">DNS 记录检查</span>
+                </div>
+                <div id="dnsContent"></div>
+            </div>
+        </div>
+
+        <div class="card hidden" id="readyCard">
+            <div class="card-head">
+                <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
+                <span data-i18n="cardReady">收件方准入检查</span>
+            </div>
+            <div id="readyContent"></div>
+        </div>
+
+        <div class="card" id="kbCard">
+            <div class="card-head">
+                <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg></div>
+                <span data-i18n="cardKb">邮件送达知识库</span>
+            </div>
+            <div id="kbContent"></div>
+        </div>
+
+        <div class="card" id="legalCard">
+            <div class="card-head">
+                <div class="icon icon-accent"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
+                <span data-i18n="cardLegal">隐私承诺与免责声明</span>
+            </div>
+            <div id="legalContent"></div>
+        </div>
+    </div>
+
+    <noscript>
+      <section>
+        <h2>常见问题 / FAQ</h2>
+        <h3>邮件进了垃圾箱，按什么顺序排查？</h3>
+        <p>按杀伤力排序：1) SPF 是否对实际发信 IP 通过——不是有没有 SPF 记录，而是这个 IP 在不在授权范围内；在 -all 策略下不通过等于直接被拒。2) 发信 IP 有没有 PTR 记录且正反解析一致。3) DKIM 是否签名并验签通过——转发场景下这是唯一还站得住的凭据。4) DMARC 对齐：SPF/DKIM 验证的域名要和 From 域名一致。5) IP 是否在垃圾源类黑名单（注意与 PBL 区分）。6) 内容与发送行为：新 IP 需要预热，短时间大量投递会触发限速。</p>
+        <h3>为什么我配了 SPF 还是失败？</h3>
+        <p>最常见三种：一是授权的是服务商但发信的是自己，比如 SPF 写 include:spf1.dm.aliyun.com 却从自建服务器直接发出，那台机器的 IP 不在服务商的 IP 段里；二是 include 嵌套太深超过 RFC 7208 规定的 10 次 DNS 查询上限，结果是 permerror，严格的收件方当作没有 SPF；三是邮件被转发过，转发会更换发信 IP，SPF 必然失败，这正是需要 DKIM 的原因。</p>
+        <h3>Spamhaus 返回 127.0.0.11 是被拉黑了吗？</h3>
+        <p>不是。127.0.0.11 属于 PBL（Policy Block List，策略列表），含义是这个 IP 段被判定为终端或云主机通用段、不应直连对方 MX 发信，与有没有发过垃圾邮件无关，云服务器 IP 段默认基本都在里面。真正的垃圾源指控是 127.0.0.2 到 127.0.0.9（SBL/CSS/XBL）。而 127.255.255.x 表示查询被拒绝——通常是用了公共 DNS 或超出免费额度，此时结果无效，不代表被列入。PBL 只在你直连对方 MX 时生效；走服务商提交服务器投递时，提交机的 PBL 状态不影响投递。</p>
+        <h3>自建邮件服务器现实吗？</h3>
+        <p>技术上不难，难的是信誉。需要同时满足：出站 25 端口可用（中国大陆云厂商默认封禁且很少批准）、IP 有 PTR 且正反解析一致、IP 不在 PBL（云主机段默认在内，需单独申请移除）、IP 历史干净、以及 SPF + DKIM + DMARC 全部正确且对齐。任何一条不满足送达率都会塌。低量场景（验证码、通知）使用服务商的邮件推送服务通常更划算。</p>
+        <h3>4xx 和 5xx 退信有什么区别？</h3>
+        <p>4xx 是临时错误，发信方应当稍后重试，常见于灰名单、速率限制、对方暂时故障，重试几次通常能过；5xx 是永久错误，重试无意义，例如地址不存在、被策略拒绝、认证失败，必须修改配置或地址。常被误读的是 4xx 灰名单——首次投递被拒是正常设计，正规 MTA 会自动重试。</p>
+        <h3>不想输入邮箱密码，可以只检查 DNS 记录吗？</h3>
+        <p>可以。Mail Trace 的「仅查记录」模式只做 DNS 侧检查：MX、A、SPF（可对指定发信 IP 完整求值）、DKIM、DMARC、MTA-STS、TLS-RPT、BIMI、DANE、发信 IP 的 PTR 与 FCrDNS、以及多个 DNSBL，并据此核对 Gmail、Yahoo、Microsoft Outlook 与国内收件方的发件人准入要求。这个模式不需要任何凭据。</p>
+        <p>源码 / Source: <a href="https://github.com/complex-mission/mail-trace">https://github.com/complex-mission/mail-trace</a>（MIT）</p>
+        <p>本页面的诊断功能需要 JavaScript。/ The diagnostic tools on this page require JavaScript.</p>
+      </section>
+    </noscript>
+
+    <div class="hint-pop" id="hintPop"></div>
+    <div class="toast" id="toast"></div>
+
+    <script>
+    // 预设分三档：全球主流邮箱 / 事务性投递服务(ESP) / 区域性服务商
+    const PRESETS = {
+        gmail:     { host:'smtp.gmail.com',            port:'587' },
+        m365:      { host:'smtp.office365.com',        port:'587' },
+        yahoo:     { host:'smtp.mail.yahoo.com',       port:'587' },
+        icloud:    { host:'smtp.mail.me.com',          port:'587' },
+        zoho:      { host:'smtp.zoho.com',             port:'465' },
+        fastmail:  { host:'smtp.fastmail.com',         port:'465' },
+        ses:       { host:'email-smtp.us-east-1.amazonaws.com', port:'587' },
+        sendgrid:  { host:'smtp.sendgrid.net',         port:'587', username:'apikey' },
+        mailgun:   { host:'smtp.mailgun.org',          port:'587' },
+        postmark:  { host:'smtp.postmarkapp.com',      port:'587' },
+        brevo:     { host:'smtp-relay.brevo.com',      port:'587' },
+        yandex:    { host:'smtp.yandex.com',           port:'465' },
+        exmail:    { host:'smtp.exmail.qq.com',        port:'465' },
+        '163':     { host:'smtp.163.com',              port:'465' },
+        aliyun:    { host:'smtp.mxhichina.com',        port:'465' },
+        aliyundm:  { host:'smtpdm.aliyun.com',         port:'465' },
+        naver:     { host:'smtp.naver.com',            port:'587' },
+        xserver:   { host:'sv860.xbiz.ne.jp',          port:'587' },
+    };
+    const KNOWN_EXTS = new Set(['STARTTLS','AUTH','SIZE','PIPELINING','8BITMIME','SMTPUTF8','ENHANCEDSTATUSCODES','CHUNKING','BINARYMIME','DSN','DELIVERBY','REQUIRETLS']);
+
+
+    // ── 图标：Lucide (ISC)，内联 SVG，描边跟随 currentColor ──────────────────
+    const ICON_PATHS = {
+      settings:  '<path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/>',
+      activity:  '<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+      lock:      '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+      zap:       '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+      globe:     '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
+      book:      '<path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/>',
+      shield:    '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+      check:     '<path d="M20 6 9 17l-5-5"/>',
+      x:         '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+      alert:     '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+      info:      '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+      chevronR:  '<path d="m9 18 6-6-6-6"/>',
+      chevronD:  '<path d="m6 9 6 6 6-6"/>',
+      help:      '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+      minus:     '<path d="M5 12h14"/>',
+      terminal:  '<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+      languages: '<path d="m5 8 6 6"/><path d="m4 14 6-6 2-3"/><path d="M2 5h12"/><path d="M7 2h1"/><path d="m22 22-5-10-5 10"/><path d="M14 18h6"/>',
+      clock:     '<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+    };
+
+    function ico(name, size, cls) {
+      const d = ICON_PATHS[name];
+      if (!d) return '';
+      return `<svg class="ico ${cls || ''}" width="${size || 16}" height="${size || 16}" viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        aria-hidden="true">${d}</svg>`;
+    }
+
+    // ── i18n ───────────────────────────────────────────────────────────────
+    let LANG = localStorage.getItem('mt_lang') || (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+    LANG = localStorage.getItem('mt_lang') || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+
+    const I18N = {
+      sub:        ['邮件发送全链路诊断 — 探测每个环节的问题', 'End-to-end mail delivery diagnostics - probe every hop'],
+      cfgTitleFull:['SMTP 服务器配置', 'SMTP Server Configuration'],
+      cfgTitleRec: ['DNS 记录检测', 'DNS Records Check'],
+      titleZh:     ['Mail Trace — 邮件发送链路诊断', 'Mail Trace — Mail Delivery Diagnostics'],
+      lblHost:    ['SMTP 服务器', 'SMTP Host'],
+      lblPort:    ['端口', 'Port'],
+      lblUser:    ['用户名', 'Username'],
+      lblPass:    ['密码', 'Password'],
+      lblFrom:    ['发件人地址', 'From Address'],
+      lblTo:      ['收件人地址', 'To Address'],
+      opt587:     ['587 — STARTTLS（推荐）', '587 - STARTTLS (recommended)'],
+      opt465:     ['465 — SSL/TLS', '465 - Implicit SSL/TLS'],
+      opt25:      ['25 — 明文（不推荐）', '25 - Cleartext (not recommended)'],
+      phPass:     ['应用专用密码或邮箱密码', 'App password or mailbox password'],
+      tgDry:      ['仅检测，不发送邮件', 'Diagnose only, do not send'],
+      tgDryHint:  ['勾选后在 DATA 步骤前停止，测试完整链路但不实际投递', 'Stops before DATA: tests the full path without delivering anything'],
+      tgTls:      ['跳过 TLS 证书校验', 'Skip TLS certificate verification'],
+      tgTlsHint:  ['当 TLS 握手因证书问题失败时勾选，可继续测试链路连通性', 'Enable when the handshake fails on certificate errors, to keep testing connectivity'],
+      btnRun:     ['开始诊断', 'Run Diagnostics'],
+      btnRunning: ['正在诊断...', 'Diagnosing...'],
+      cardSteps:  ['诊断步骤', 'Diagnostic Steps'],
+      cardTls:    ['TLS 证书信息', 'TLS Certificate'],
+      cardExt:    ['服务器扩展能力 (EHLO)', 'Server Capabilities (EHLO)'],
+      cardDns:    ['DNS 记录检查', 'DNS Records'],
+      cardKb:     ['邮件送达知识库', 'Deliverability Knowledge Base'],
+      cardLegal:  ['隐私承诺与免责声明', 'Privacy Commitment & Disclaimer'],
+      modeRecords:['仅查记录', 'Records check'],
+      modeFull:   ['完整链路诊断', 'Full delivery test'],
+      hintRecords:['只查 DNS：SPF / DKIM / DMARC / MX / PTR / 黑名单，并核对 Gmail、Microsoft 等收件方的准入要求。不需要邮箱密码，适合刚改完解析想确认是否生效。',
+                   'DNS only: SPF / DKIM / DMARC / MX / PTR / blocklists, cross-checked against the sender requirements of Gmail, Microsoft and others. No mailbox password needed - ideal right after changing DNS.'],
+      hintFull:   ['真实建立一次 SMTP 会话，逐跳测到 DATA。需要邮箱账号，能测出记录检查看不到的问题：TLS 握手、认证、服务器策略、实际投递应答。',
+                   'Opens a real SMTP session and traces every hop through DATA. Needs mailbox credentials, and catches what a records check cannot: TLS handshake, authentication, server policy and the actual delivery reply.'],
+      lblDomain:  ['域名', 'Domain'],
+      phDomain:   ['example.com（也可直接粘贴邮箱地址）', 'example.com (pasting a full email address also works)'],
+      lblSendIP:  ['发信 IP（可选）', 'Sending IP (optional)'],
+      phSendIP:   ['203.0.113.10 — 填了才能判定 SPF/PTR', '203.0.113.10 - required to judge SPF and PTR'],
+      lblSelectors:['DKIM 选择器（可选）', 'DKIM selectors (optional)'],
+      phSelectors:['s1, google — 逗号分隔', 's1, google - comma separated'],
+      btnRecords: ['检测 DNS 记录', 'Check DNS Records'],
+      btnChecking:['正在检测...', 'Checking...'],
+      cardReady:  ['收件方准入检查', 'Receiver Requirements'],
+      needDomain: ['请填写域名', 'Please enter a domain'],
+      reqAll:     ['所有发件人', 'all senders'],
+      reqBulk:    ['大批量发件人', 'bulk senders'],
+      naNote:     ['无法从 DNS 检测', 'not detectable from DNS'],
+      psgMail:    ['邮箱服务', 'Mailbox providers'],
+      psgEsp:     ['投递服务', 'Sending services'],
+      psgRegion:  ['区域服务商', 'Regional providers'],
+      lede:       ['Mail Trace 是一个开源的邮件送达率诊断工具：它真实建立一次 SMTP 会话，逐跳记录 DNS、TCP、TLS、认证与投递，并完整求值 SPF、检查发信 IP 的反向解析、区分 DNSBL 返回码的含义。账号密码不落盘、不记录、不转发。',
+                   'Mail Trace is an open-source mail deliverability diagnostic: it opens a real SMTP session, records every hop from DNS through TLS, authentication and delivery, fully evaluates SPF, checks the sending IP\'s reverse DNS, and tells apart what each DNSBL return code actually means. Credentials are never persisted, logged or forwarded.'],
+      needFields: ['请填写所有必填字段', 'Please fill in every required field'],
+      elapsed:    ['已用时', 'Elapsed'],
+      doneIn:     ['诊断完成，总用时', 'Completed in'],
+      failedAt:   ['步骤失败', 'failed'],
+      allPass:    ['全部通过 — 邮件发送链路正常', 'All checks passed - the delivery path is healthy'],
+      reqFail:    ['请求失败', 'Request failed'],
+      showResp:   ['查看服务器响应', 'Show server response'],
+      hideResp:   ['隐藏服务器响应', 'Hide server response'],
+      tipsTitle:  ['排查建议', 'What to do'],
+      roleSend:   ['发件方 — 下列记录直接影响你的送达率', 'Sender - these records drive your deliverability'],
+      roleRecv:   ['收件方 — 只需要 MX 可达，其余记录与你的发送无关', 'Recipient - only MX matters here; the rest does not affect your sending'],
+      senderDomain: ['发件人域名', 'Sender domain'],
+      recvDomain:   ['收件人域名', 'Recipient domain'],
+      notCfg:     ['未配置', 'not configured'],
+      notFound:   ['未找到', 'not found'],
+      dkimNote:   ['未探测到 — DKIM 选择器无法枚举，可能由第三方服务代签或使用了自定义选择器',
+                   'Not detected - DKIM selectors cannot be enumerated; it may be signed by a third party or use a custom selector'],
+      naRecv:     ['不适用（收件方无需此记录）', 'N/A (not needed to receive mail)'],
+    };
+
+    const HINTS = {
+      mx: ['MX 记录', 'MX Record',
+        `<p>告诉别人「发给这个域名的邮件应该投到哪台服务器」。<b>只有收件方需要 MX</b>——你要收信就必须有，只发信不收信可以没有。</p>
+         <p>优先级数字越小越先尝试。<code>mx.ym.163.com (10)</code> 表示优先投这台。</p>`,
+        `<p>Tells the world which server accepts mail for this domain. <b>Only receiving requires MX</b> - a send-only domain can live without it.</p>
+         <p>Lower priority number is tried first. <code>mx.ym.163.com (10)</code> means try that host first.</p>`],
+      a: ['A 记录', 'A Record',
+        `<p>域名指向的 IPv4 地址，通常是<b>网站</b>的地址。</p>
+         <p><b>和发信几乎无关。</b>收件人域名没有 A 记录完全正常——收信只看 MX。很多检测工具在这里打红叉是错的。</p>`,
+        `<p>The IPv4 address a domain points at - usually the <b>website</b>.</p>
+         <p><b>Almost irrelevant to mail.</b> A recipient domain with no A record is perfectly normal; receiving only depends on MX. Tools that flag this are wrong.</p>`],
+      spf: ['SPF', 'SPF',
+        `<p>一条 TXT 记录，声明「哪些 IP 有权用我的域名发信」。收件方拿实际连接过来的 IP 去比对。</p>
+         <p>结尾的限定符是关键：</p>
+         <table><tr><th>写法</th><th>含义</th><th>后果</th></tr>
+         <tr><td><code>-all</code></td><td>硬失败</td><td>未列出的 IP 发信，多数收件方<b>直接拒收</b></td></tr>
+         <tr><td><code>~all</code></td><td>软失败</td><td>通常收下，但大概率进垃圾箱</td></tr>
+         <tr><td><code>?all</code></td><td>中立</td><td>等于没保护</td></tr></table>
+         <p><b>最常见的翻车</b>：SPF 里写的是服务商的 include，实际却从自建服务器直接发出去——IP 不在授权范围，配上 <code>-all</code> 就是必死。</p>
+         <p>另一个坑：SPF 求值最多 10 次 DNS 查询（RFC 7208），include 套太多层会 permerror，等于没有 SPF。</p>`,
+        `<p>A TXT record declaring which IPs may send mail as your domain. The receiver checks the IP that actually connected.</p>
+         <p>The trailing qualifier is what matters:</p>
+         <table><tr><th>Token</th><th>Meaning</th><th>Consequence</th></tr>
+         <tr><td><code>-all</code></td><td>hard fail</td><td>Unlisted IPs are <b>rejected outright</b> by most receivers</td></tr>
+         <tr><td><code>~all</code></td><td>soft fail</td><td>Usually accepted, but very likely filed as spam</td></tr>
+         <tr><td><code>?all</code></td><td>neutral</td><td>No protection at all</td></tr></table>
+         <p><b>The classic failure</b>: the record includes a provider, but mail actually leaves a self-hosted box. The IP is unauthorized, and with <code>-all</code> that is fatal.</p>
+         <p>Another trap: SPF evaluation is capped at 10 DNS lookups (RFC 7208). Too many nested includes cause permerror, which is as bad as having no SPF.</p>`],
+      dkim: ['DKIM', 'DKIM',
+        `<p>用私钥给邮件头和正文签名，公钥放在 <code>选择器._domainkey.你的域名</code> 的 TXT 记录里。收件方验签，证明邮件中途没被改、确实来自这个域名。</p>
+         <p><b>选择器无法枚举</b>——本工具只能探测常见命名（default / s1 / selector1 / aliyun ...）。探测不到不代表没配置。</p>
+         <p>DKIM 比 SPF 更稳：邮件被转发时 SPF 会失效（发信 IP 变了），DKIM 签名仍然有效。</p>`,
+        `<p>Signs the headers and body with a private key; the public key lives in a TXT record at <code>selector._domainkey.yourdomain</code>. Receivers verify it to prove the mail was not altered and really came from the domain.</p>
+         <p><b>Selectors cannot be enumerated</b> - this tool probes common names (default / s1 / selector1 / aliyun ...). Not finding one does not mean DKIM is missing.</p>
+         <p>DKIM survives forwarding, which breaks SPF (the sending IP changes). That makes it the more robust signal.</p>`],
+      dmarc: ['DMARC', 'DMARC',
+        `<p>建立在 SPF 和 DKIM 之上，回答两个问题：<b>没通过时怎么办</b>，以及<b>把报告发给谁</b>。</p>
+         <p>关键概念是<b>对齐（alignment）</b>：光 SPF 通过不算数，SPF 验证的域名还必须和用户看到的 From 域名一致。这挡住了「用自己的域名通过 SPF，却在 From 里冒充别人」的把戏。</p>
+         <p>记录放在 <code>_dmarc.你的域名</code>。`+"`"+`rua=` + "`" + ` 指定聚合报告接收地址，强烈建议填——那是你唯一能看到「谁在冒用你的域名」的渠道。</p>`,
+        `<p>Sits on top of SPF and DKIM and answers two questions: <b>what to do on failure</b>, and <b>where to send reports</b>.</p>
+         <p>The key idea is <b>alignment</b>: passing SPF is not enough - the domain SPF validated must match the From domain the user sees. This blocks the trick of passing SPF with your own domain while forging someone else's From.</p>
+         <p>The record lives at <code>_dmarc.yourdomain</code>. Set <code>rua=</code>: aggregate reports are the only way to see who is forging your domain.</p>`],
+      dmarcPolicy: ['DMARC 策略 (p=)', 'DMARC Policy (p=)',
+        `<table><tr><th>策略</th><th>收件方行为</th></tr>
+         <tr><td><code>p=none</code></td><td>只观察、只发报告，<b>不做任何拦截</b></td></tr>
+         <tr><td><code>p=quarantine</code></td><td>未通过的投进垃圾箱</td></tr>
+         <tr><td><code>p=reject</code></td><td>未通过的直接拒收</td></tr></table>
+         <p><code>p=none</code> 常被工具标成「已配置 ✓」，但它<b>不提供任何保护</b>，只是观察期。正确路径是：none 跑一两个月看报告 → quarantine → reject。</p>`,
+        `<table><tr><th>Policy</th><th>Receiver behaviour</th></tr>
+         <tr><td><code>p=none</code></td><td>Monitor and report only - <b>nothing is blocked</b></td></tr>
+         <tr><td><code>p=quarantine</code></td><td>Failures go to the spam folder</td></tr>
+         <tr><td><code>p=reject</code></td><td>Failures are rejected outright</td></tr></table>
+         <p>Tools often mark <code>p=none</code> as "configured", but it offers <b>no protection</b> - it is an observation phase. The path is: none for a month or two while reading reports, then quarantine, then reject.</p>`],
+      ptr: ['反向解析 (PTR)', 'Reverse DNS (PTR)',
+        `<p>从 IP 反查域名，由 <b>IP 的持有方</b>设置（你的云服务商），不是在你的域名 DNS 里加记录。</p>
+         <p><b>自建邮件服务器没有 PTR ≈ 必进垃圾箱。</b>163、QQ、Gmail 都会对无 PTR 的连接直接拒收。</p>
+         <p>注意：该查的是<b>实际建立 SMTP 连接的那个 IP</b>，不是域名的 A 记录。很多工具查错了对象。</p>`,
+        `<p>Maps an IP back to a hostname. It is set by <b>whoever owns the IP</b> (your cloud provider), not in your domain's DNS zone.</p>
+         <p><b>A self-hosted mail server without PTR is effectively junk-foldered.</b> 163, QQ and Gmail all reject or penalise connections with no PTR.</p>
+         <p>Note: the IP that matters is the one that <b>actually opens the SMTP connection</b>, not the domain's A record. Many tools check the wrong thing.</p>`],
+      fcrdns: ['FCrDNS', 'FCrDNS',
+        `<p>正反解析闭环：IP → PTR 得到域名，这个域名再正查回来必须是<b>同一个 IP</b>。</p>
+         <p>只有 PTR 但正查对不上，收件方仍会认为不可信——因为 PTR 谁都能随便指，正反一致才证明两端都是你控制的。</p>`,
+        `<p>Forward-confirmed reverse DNS: IP -> PTR gives a hostname, and that hostname must resolve back to the <b>same IP</b>.</p>
+         <p>A PTR alone is not enough - anyone can point a PTR anywhere. Only the round trip proves you control both ends.</p>`],
+      dnsbl: ['DNSBL 黑名单', 'DNSBL Blocklists',
+        `<p>把命中笼统叫「黑名单」是错的，必须分三类看返回码：</p>
+         <table><tr><th>类型</th><th>返回码示例</th><th>含义</th></tr>
+         <tr><td>垃圾源</td><td><code>127.0.0.2-.9</code></td><td>SBL/XBL/CSS：有真实垃圾邮件或被入侵记录，<b>硬问题</b></td></tr>
+         <tr><td>策略列表</td><td><code>127.0.0.10/.11</code></td><td>PBL：该 IP 段「不应直连 MX 发信」，云主机段默认全在里面，<b>不是垃圾邮件指控</b></td></tr>
+         <tr><td>查询被拒</td><td><code>127.255.255.x</code></td><td>你用了公共 DNS 或超额，<b>结果无效</b>，不代表被列入</td></tr></table>
+         <p>PBL 只在<b>你直连对方 MX</b> 时咬人。走服务商提交服务器投递时，提交机的 PBL 状态与你无关。</p>`,
+        `<p>Calling every hit a "blocklist" is wrong. Return codes fall into three very different classes:</p>
+         <table><tr><th>Class</th><th>Example code</th><th>Meaning</th></tr>
+         <tr><td>Spam source</td><td><code>127.0.0.2-.9</code></td><td>SBL/XBL/CSS: real spam or compromise on record - a <b>hard problem</b></td></tr>
+         <tr><td>Policy list</td><td><code>127.0.0.10/.11</code></td><td>PBL: "this range should not talk to MX hosts directly". Most cloud ranges are in it. <b>Not a spam accusation.</b></td></tr>
+         <tr><td>Query refused</td><td><code>127.255.255.x</code></td><td>You queried via a public resolver or hit the free-use cap. <b>The result is void</b>, not a listing.</td></tr></table>
+         <p>PBL only bites when <b>you connect directly to the recipient's MX</b>. If you submit through a provider, the submission host's PBL status is irrelevant.</p>`],
+      submission: ['提交服务器 vs 直连投递', 'Submission vs Direct Delivery',
+        `<p>这是判断 SPF / PTR / DNSBL 该看哪个 IP 的分水岭。</p>
+         <p><b>走服务商提交（465/587 + 认证）</b>：你连的是提交服务器，但真正连对方 MX 的是服务商的<b>出口 IP 池</b>。所以 PTR 和黑名单由服务商负责，你只需要在 SPF 里 include 服务商。</p>
+         <p><b>自建服务器直连投递</b>：你的 IP 就是出口 IP。PTR、PBL、IP 信誉全部由你自己承担，门槛高得多。</p>`,
+        `<p>This is what decides which IP SPF, PTR and DNSBL should be judged against.</p>
+         <p><b>Provider submission (465/587 + AUTH)</b>: you connect to a submission host, but the provider's <b>egress pool</b> is what talks to the recipient's MX. PTR and blocklist hygiene are the provider's job; you only need to include them in SPF.</p>
+         <p><b>Self-hosted direct delivery</b>: your IP is the egress IP. PTR, PBL and IP reputation are entirely your problem - a much higher bar.</p>`],
+      ports: ['端口 25 / 465 / 587', 'Ports 25 / 465 / 587',
+        `<table><tr><th>端口</th><th>用途</th><th>加密</th></tr>
+         <tr><td>25</td><td>服务器之间投递（MTA→MTA）</td><td>可选 STARTTLS</td></tr>
+         <tr><td>465</td><td>客户端提交</td><td>连上即 TLS（隐式）</td></tr>
+         <tr><td>587</td><td>客户端提交（标准）</td><td>STARTTLS 升级</td></tr></table>
+         <p>国内云厂商（阿里云、腾讯云）<b>默认封禁 25 端口出站</b>且基本不批开通，这是自建邮件服务器在大陆最大的障碍。465/587 通常不受影响。</p>`,
+        `<table><tr><th>Port</th><th>Purpose</th><th>Encryption</th></tr>
+         <tr><td>25</td><td>Server-to-server delivery (MTA to MTA)</td><td>Optional STARTTLS</td></tr>
+         <tr><td>465</td><td>Client submission</td><td>TLS from the first byte (implicit)</td></tr>
+         <tr><td>587</td><td>Client submission (standard)</td><td>Upgraded via STARTTLS</td></tr></table>
+         <p>Mainland-China cloud providers block outbound port 25 by default and rarely grant exceptions - the single biggest obstacle to self-hosting mail there. 465 and 587 are normally unaffected.</p>`],
+      mtasts: ['MTA-STS / TLS-RPT / DANE', 'MTA-STS / TLS-RPT / DANE',
+        `<p>SMTP 的 STARTTLS 天生可被中间人降级成明文。这三件东西是补丁：</p>
+         <ul><li><b>MTA-STS</b>：用 HTTPS 发布一份策略，声明「发给我必须用 TLS 且证书必须有效」。</li>
+         <li><b>TLS-RPT</b>：让对方把 TLS 失败情况汇报给你。</li>
+         <li><b>DANE</b>：用 DNSSEC 签名的 TLSA 记录锁定证书，比 MTA-STS 更强但要求全链路 DNSSEC。</li></ul>
+         <p>三者都是<b>收信方</b>的保护措施，属于加分项，不配置不影响发信。</p>`,
+        `<p>SMTP's STARTTLS can always be stripped by an active attacker. These three close that gap:</p>
+         <ul><li><b>MTA-STS</b>: publishes a policy over HTTPS saying "mail to me must use TLS with a valid certificate".</li>
+         <li><b>TLS-RPT</b>: asks senders to report TLS failures back to you.</li>
+         <li><b>DANE</b>: pins the certificate via DNSSEC-signed TLSA records - stronger than MTA-STS, but requires DNSSEC end to end.</li></ul>
+         <p>All three protect you as a <b>receiver</b>. They are bonus points and do not affect your ability to send.</p>`],
+      bimi: ['BIMI', 'BIMI',
+        `<p>在收件箱里显示你的品牌 Logo。<b>前提是 DMARC 已经到 quarantine 或 reject</b>——BIMI 是 DMARC 做到位之后的奖励，不是独立功能。</p>`,
+        `<p>Shows your brand logo in the inbox. <b>It requires DMARC at quarantine or reject first</b> - BIMI is a reward for getting DMARC right, not a standalone feature.</p>`],
+    };
+
+    function t(k) { return (I18N[k] || ['', ''])[LANG === 'en' ? 1 : 0]; }
+
+    // 步骤卡片上的问号：后端按语言返回步骤名，两种写法都映射
+    const STEP_HINTS = {
+      '发信 IP 反向解析': ['ptr', 'fcrdns'], 'Sending IP Reverse DNS': ['ptr', 'fcrdns'],
+      'DNSBL 黑名单': ['dnsbl'],            'DNSBL Blocklists': ['dnsbl'],
+      'SPF 验证': ['spf', 'submission'],    'SPF Evaluation': ['spf', 'submission'],
+      'STARTTLS 加密': ['ports'],           'STARTTLS': ['ports'],
+      'SSL/TLS 加密': ['ports'],            'SSL/TLS': ['ports'],
+      'MAIL FROM (发件人)': ['submission'],  'MAIL FROM (sender)': ['submission'],
+    };
+
+    function stepHints(name) {
+      return (STEP_HINTS[name] || []).map(hint).join('');
+    }
+
+    function hint(key) {
+      if (!HINTS[key]) return '';
+      return `<button type="button" class="hint-btn" aria-label="?" onclick="showHint(event,'${key}')">${ico('help', 14)}</button>`;
+    }
+
+    function showHint(ev, key) {
+      ev.stopPropagation();
+      const h = HINTS[key];
+      if (!h) return;
+      const pop = document.getElementById('hintPop');
+      pop.innerHTML = `<button type="button" class="close" aria-label="close" onclick="document.getElementById('hintPop').classList.remove('show')">${ico('x', 14)}</button>
+        <h4>${LANG === 'en' ? h[1] : h[0]}</h4>${LANG === 'en' ? h[3] : h[2]}`;
+      pop.classList.add('show');
+      const r = ev.target.getBoundingClientRect();
+      const pw = pop.offsetWidth, ph = pop.offsetHeight;
+      let left = Math.min(r.left, window.innerWidth - pw - 16);
+      let top = r.bottom + 8;
+      if (top + ph > window.innerHeight - 8) top = Math.max(8, r.top - ph - 8);
+      pop.style.left = Math.max(8, left) + 'px';
+      pop.style.top = top + 'px';
+    }
+    document.addEventListener('click', e => {
+      const pop = document.getElementById('hintPop');
+      if (pop && !pop.contains(e.target) && !e.target.classList.contains('hint-btn')) pop.classList.remove('show');
+    });
+
+    // ── 知识库 ──────────────────────────────────────────────────────────────
+    const KB = [
+      ['邮件进了垃圾箱，按什么顺序排查？', 'My mail lands in spam - what do I check first?',
+       `<p>按「杀伤力」排序，从上往下查，前两项没解决时优化后面的没有意义：</p>
+        <ol><li><b>SPF 是否对实际发信 IP 通过</b>。不是「有没有 SPF 记录」，而是「这个 IP 在不在授权范围内」。<code>-all</code> 下不通过 = 直接被拒。</li>
+        <li><b>发信 IP 有没有 PTR，且正反一致</b>。自建服务器缺这个基本没救。</li>
+        <li><b>DKIM 是否签名并验签通过</b>。转发场景下这是唯一还站得住的凭据。</li>
+        <li><b>DMARC 对齐</b>。SPF/DKIM 验证的域名要和 From 域名一致。</li>
+        <li><b>IP 是否在垃圾源类黑名单</b>（注意区分 PBL）。</li>
+        <li><b>内容与发送行为</b>：新 IP 需要预热，短时间大量投递会触发限速。</li></ol>`,
+       `<p>Ordered by impact. Fixing anything below before the top two is wasted effort:</p>
+        <ol><li><b>Does SPF pass for the IP that actually sends?</b> Not "is there an SPF record" but "is this IP inside it". Under <code>-all</code>, failing means outright rejection.</li>
+        <li><b>Does the sending IP have a PTR, with forward and reverse agreeing?</b> A self-hosted server without this is a lost cause.</li>
+        <li><b>Is DKIM signing and verifying?</b> It is the only credential that survives forwarding.</li>
+        <li><b>DMARC alignment.</b> The domain SPF/DKIM validated must match the From domain.</li>
+        <li><b>Is the IP on a spam-source blocklist?</b> (distinguish this from PBL).</li>
+        <li><b>Content and sending behaviour.</b> New IPs need warm-up; bursts trigger rate limits.</li></ol>`],
+      ['为什么我配了 SPF 还是失败？', 'I configured SPF and it still fails - why?',
+       `<p>最常见的三种情况：</p>
+        <ul><li><b>授权的是服务商，发信的是自己。</b>比如 SPF 写 <code>include:spf1.dm.aliyun.com</code>（阿里云邮件推送），但邮件其实从你自建的服务器直接发出——那台机器的 IP 根本不在阿里的 IP 段里。</li>
+        <li><b>超过 10 次 DNS 查询上限。</b>include 套娃太多层直接 permerror，严格的收件方当作没有 SPF 处理。</li>
+        <li><b>邮件被转发过。</b>转发会换发信 IP，SPF 必然失败——这正是需要 DKIM 的原因。</li></ul>`,
+       `<p>Three common causes:</p>
+        <ul><li><b>You authorized a provider but send from yourself.</b> e.g. SPF says <code>include:spf1.dm.aliyun.com</code> (Alibaba DirectMail) while mail actually leaves your own box, whose IP is nowhere in Alibaba's ranges.</li>
+        <li><b>You blew the 10-lookup limit.</b> Deeply nested includes cause permerror, and strict receivers treat that as no SPF at all.</li>
+        <li><b>The mail was forwarded.</b> Forwarding changes the sending IP, so SPF must fail - which is exactly why DKIM exists.</li></ul>`],
+      ['自建邮件服务器现实吗？', 'Is self-hosting a mail server realistic?',
+       `<p>技术上不难，<b>难的是信誉</b>。你需要同时满足：</p>
+        <ul><li>出站 25 端口可用（国内云厂商默认封禁且不批）</li>
+        <li>IP 有 PTR 且正反一致（需要服务商支持配置）</li>
+        <li>IP 不在 PBL（云主机段默认在里面，需单独申请移除）</li>
+        <li>IP 是「干净」的（二手 IP 可能继承前任的劣迹）</li>
+        <li>SPF + DKIM + DMARC 全部正确且对齐</li></ul>
+        <p>任何一条不满足，送达率就会塌。低量场景（验证码、通知）用服务商的邮件推送服务通常更划算。</p>`,
+       `<p>Technically easy; <b>reputation is the hard part</b>. You need all of the following at once:</p>
+        <ul><li>Outbound port 25 available (blocked by default on mainland-China clouds, rarely granted)</li>
+        <li>A PTR on the IP with matching forward lookup (requires provider support)</li>
+        <li>The IP not in PBL (cloud ranges are listed by default; removal must be requested)</li>
+        <li>A "clean" IP - recycled addresses inherit the previous tenant's history</li>
+        <li>SPF + DKIM + DMARC all correct and aligned</li></ul>
+        <p>Miss any one and deliverability collapses. For low volume (OTPs, notifications) a provider's sending service is usually the better trade.</p>`],
+      ['国内收件方（163/QQ/阿里）有什么特别的？', 'What is different about Chinese receivers (163/QQ/Alibaba)?',
+       `<p><b>它们不公开信誉数据，也不走公开黑名单。</b>所以任何在线工具都查不到「我在 QQ 那边的信誉如何」，只能靠退信码倒推。</p>
+        <ul><li>对无 PTR 的连接尤其严格，经常直接 5xx 拒收。</li>
+        <li>对新 IP 有明显的观察期，需要低量预热。</li>
+        <li>退信信息通常带一个帮助页 URL，那是唯一的申诉入口。</li>
+        <li>QQ/163 有独立的「白名单/反馈」渠道，批量发送前建议先申请。</li></ul>`,
+       `<p><b>They publish no reputation data and do not use public blocklists.</b> No online tool can tell you your standing at QQ - you can only infer it from bounce codes.</p>
+        <ul><li>They are especially strict about missing PTR, often rejecting with a hard 5xx.</li>
+        <li>New IPs face a clear observation period and need low-volume warm-up.</li>
+        <li>Bounce messages usually carry a help URL - that is the only appeal channel.</li>
+        <li>QQ and 163 run their own allowlist/feedback programs; apply before sending in volume.</li></ul>`],
+      ['4xx 和 5xx 退信有什么区别？', 'What is the difference between 4xx and 5xx bounces?',
+       `<p><b>4xx 是临时的</b>，发信方应当稍后重试：灰名单、速率限制、对方暂时故障。重试几次通常能过。</p>
+        <p><b>5xx 是永久的</b>，重试无意义：地址不存在、被策略拒绝、认证失败。必须改配置或改地址。</p>
+        <p>常被误读的是 <code>4xx</code> 灰名单——第一次投递被拒是<b>正常设计</b>，正规 MTA 会自动重试，只有不重试的脚本才会以为失败了。</p>`,
+       `<p><b>4xx is temporary</b> and the sender should retry later: greylisting, rate limits, a transient fault on their side. Retries usually succeed.</p>
+        <p><b>5xx is permanent</b> and retrying is pointless: no such address, policy rejection, authentication failure. Something must change.</p>
+        <p>The commonly misread case is 4xx greylisting - a first-attempt rejection is <b>by design</b>. Proper MTAs retry automatically; only naive scripts treat it as failure.</p>`],
+    ];
+
+    function renderKB() {
+      document.getElementById('kbContent').innerHTML = KB.map((item, i) => `
+        <div class="kb-item">
+          <div class="kb-q" onclick="toggleKB(${i})">
+            <span>${LANG === 'en' ? item[1] : item[0]}</span><span class="chev" id="kbc${i}">${ico('chevronR', 15)}</span>
+          </div>
+          <div class="kb-a" id="kba${i}">${LANG === 'en' ? item[3] : item[2]}</div>
+        </div>`).join('');
+    }
+    function toggleKB(i) {
+      const a = document.getElementById('kba' + i), c = document.getElementById('kbc' + i);
+      a.classList.toggle('show');
+      c.innerHTML = ico(a.classList.contains('show') ? 'chevronD' : 'chevronR', 15);
+    }
+
+    // ── 隐私承诺 / 免责声明 ────────────────────────────────────────────────
+    const LEGAL_ZH = `
+      <div class="kb-a show" style="padding-top:4px">
+        <p><b>我们对账号凭据的承诺</b></p>
+        <ul>
+          <li><b>不落盘</b>：用户名和密码只存在于处理该次请求的内存中，请求结束即随进程内存释放。服务端不写入任何数据库、日志或文件。</li>
+          <li><b>不记录</b>：服务端日志只记录请求来源 IP 与限流计数，不包含任何凭据、邮箱地址或邮件内容。</li>
+          <li><b>不转发</b>：凭据只用于向你自己填写的那台 SMTP 服务器发起认证，不发送给任何第三方。</li>
+          <li><b>不留会话</b>：本工具没有账号体系、不设 Cookie、不做用户画像。</li>
+          <li><b>单次使用</b>：每次诊断都需要重新填写，服务端不做任何形式的缓存或"记住密码"。</li>
+        </ul>
+        <p><b>你仍然应当注意的风险</b></p>
+        <ul>
+          <li>凭据在浏览器到本站之间以 HTTPS 传输。<b>请确认地址栏是 https</b>；若为 http，请勿输入密码。</li>
+          <li>强烈建议使用<b>应用专用密码</b>或专门为测试创建的子账号，而不是主邮箱密码。用完即可撤销。</li>
+          <li>本工具以 MIT 协议<b>完全开源</b>，代码见
+              <a href="https://github.com/complex-mission/mail-trace" target="_blank" rel="noopener">github.com/complex-mission/mail-trace</a>。
+              上面这些承诺你不必相信我们——可以直接读代码验证，也可以自行部署在你完全可控的服务器上。</li>
+        </ul>
+        <p><b>免责声明</b></p>
+        <ul>
+          <li>本工具仅用于诊断<b>你自己拥有或已获授权</b>的邮件服务。不得用于未经授权的账号探测、凭据爆破或任何违法用途。</li>
+          <li>诊断结果基于公开 DNS 数据和一次真实 SMTP 会话，反映查询时刻的状态，<b>不构成任何保证</b>。收件方的实际过滤策略不公开，本工具无法预测。</li>
+          <li>非"仅检测"模式下会向收件人地址<b>实际投递一封诊断邮件</b>，请确认你有权向该地址发信。</li>
+          <li>因使用本工具产生的任何直接或间接损失，本站不承担责任。</li>
+        </ul>
+      </div>`;
+    const LEGAL_EN = `
+      <div class="kb-a show" style="padding-top:4px">
+        <p><b>Our commitment on credentials</b></p>
+        <ul>
+          <li><b>Never persisted</b>: the username and password exist only in the memory handling that one request and are released when it ends. Nothing is written to a database, log or file.</li>
+          <li><b>Never logged</b>: server logs contain only the source IP and rate-limit counters - no credentials, addresses or message content.</li>
+          <li><b>Never forwarded</b>: credentials are used solely to authenticate against the SMTP server you entered, and are sent nowhere else.</li>
+          <li><b>No session</b>: there are no accounts, no cookies and no profiling.</li>
+          <li><b>Single use</b>: every run requires re-entry. Nothing is cached and there is no "remember me".</li>
+        </ul>
+        <p><b>Risks you should still weigh</b></p>
+        <ul>
+          <li>Credentials travel from your browser to this site over HTTPS. <b>Check that the address bar shows https</b>; never type a password on a plain-http page.</li>
+          <li>Strongly prefer an <b>app-specific password</b> or a throwaway sub-account over your primary mailbox password, and revoke it afterwards.</li>
+          <li>This tool is <b>fully open source</b> under the MIT licence at
+              <a href="https://github.com/complex-mission/mail-trace" target="_blank" rel="noopener">github.com/complex-mission/mail-trace</a>.
+              You do not have to take these commitments on faith — read the code, or run your own instance on infrastructure you fully control.</li>
+        </ul>
+        <p><b>Disclaimer</b></p>
+        <ul>
+          <li>Use this tool only against mail services <b>you own or are authorised to test</b>. Unauthorised probing, credential brute-forcing and any unlawful use are prohibited.</li>
+          <li>Results come from public DNS data and one real SMTP session. They describe the state at query time and are <b>not a guarantee</b>. Receivers do not publish their filtering rules and cannot be predicted.</li>
+          <li>Outside "diagnose only" mode, a real diagnostic message <b>is delivered</b> to the recipient. Make sure you are entitled to send to that address.</li>
+          <li>No liability is accepted for any direct or indirect loss arising from use of this tool.</li>
+        </ul>
+      </div>`;
+
+    const CRED_NOTICE_ZH = `<strong>关于你即将输入的密码：</strong>服务端<b>不落盘、不记录、不转发</b>，仅在本次请求的内存中用于向你填写的 SMTP 服务器认证，请求结束即释放。建议使用<b>应用专用密码</b>而非主账号密码。详见页面底部的隐私承诺。`;
+    const CRED_NOTICE_EN = `<strong>About the password you are about to type:</strong> it is <b>never persisted, logged or forwarded</b>. It lives only in memory for this one request, used to authenticate against the SMTP host you entered, and is released when the request ends. Prefer an <b>app-specific password</b>. Full commitment at the bottom of this page.`;
+
+    // ── 语言切换 ────────────────────────────────────────────────────────────
+    function setLang(l) {
+      LANG = l;
+      localStorage.setItem('mt_lang', l);
+      document.documentElement.lang = (l === 'en' ? 'en' : 'zh-CN');
+      document.getElementById('langZh').classList.toggle('active', l === 'zh');
+      document.getElementById('langEn').classList.toggle('active', l === 'en');
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const v = t(el.getAttribute('data-i18n'));
+        if (v) el.textContent = v;
+      });
+      document.querySelectorAll('[data-ph]').forEach(el => {
+        const v = t(el.getAttribute('data-ph'));
+        if (v) el.placeholder = v;
+      });
+      document.title = l === 'en'
+        ? 'Mail Trace — Mail Delivery Diagnostics | SMTP · SPF · DKIM · DMARC · PTR in one pass'
+        : 'Mail Trace — 邮件发送链路诊断 | SMTP · SPF · DKIM · DMARC · PTR 一次测完';
+      document.getElementById('credNotice').innerHTML = l === 'en' ? CRED_NOTICE_EN : CRED_NOTICE_ZH;
+      document.getElementById('legalContent').innerHTML = l === 'en' ? LEGAL_EN : LEGAL_ZH;
+      renderKB();
+      if (typeof MODE !== 'undefined') setModeText();
+      if (LAST_DNS) renderDNS(LAST_DNS, LAST_DOMAIN);
+      if (LAST_RECORDS) renderReadiness(LAST_RECORDS);
+    }
+
+    function setModeText() {
+      const h = document.getElementById('modeHint');
+      if (h) h.textContent = t(MODE === 'full' ? 'hintFull' : 'hintRecords');
+      const c = document.getElementById('cfgTitle');
+      if (c) c.textContent = t(MODE === 'full' ? 'cfgTitleFull' : 'cfgTitleRec');
+    }
+
+    let LAST_DNS = null;
+    let LAST_DOMAIN = null;
+    let MODE = localStorage.getItem('mt_mode') || 'records';
+
+    function setMode(m) {
+      MODE = m;
+      localStorage.setItem('mt_mode', m);
+      document.getElementById('tabRecords').classList.toggle('active', m === 'records');
+      document.getElementById('tabFull').classList.toggle('active', m === 'full');
+      document.getElementById('recordsPane').classList.toggle('hidden', m !== 'records');
+      document.getElementById('fullPane').classList.toggle('hidden', m !== 'full');
+      document.getElementById('credNotice').style.display = m === 'full' ? '' : 'none';
+      setModeText();
+      // 切换模式时清空上一次的结果，避免两种模式的输出混在一起
+      document.getElementById('resultsArea').classList.add('hidden');
+      document.getElementById('readyCard').classList.add('hidden');
+      document.getElementById('dnsCard').classList.add('hidden');
+    }
+
+    function renderReadiness(res) {
+      const card = document.getElementById('readyCard');
+      card.classList.remove('hidden');
+      const vLabel = { ok: 'READY', warn: 'CHECK', fail: 'BLOCKED' };
+      const vIco = { ok: 'check', warn: 'alert', fail: 'x' };
+      const html = (res.readiness || []).map(r => `
+        <div class="rcv">
+          <div class="rcv-head">
+            <span>${esc(r.receiver)}</span>
+            <span class="rcv-verdict ${r.verdict}">${ico(vIco[r.verdict], 12)}${vLabel[r.verdict] || ''}</span>
+          </div>
+          <div class="rcv-note">${esc(r.note)}</div>
+          <div class="rcv-list">
+            ${(r.checks || []).map(c => `
+              <div class="rcv-item">
+                <span class="rcv-ico ${c.status}">${ico(c.status === 'ok' ? 'check' : c.status === 'fail' ? 'x' : c.status === 'warn' ? 'alert' : 'minus', 13)}</span>
+                <span class="rcv-label">${esc(c.label)}<span class="rcv-req">${c.required === 'bulk' ? t('reqBulk') : t('reqAll')}</span></span>
+                <span class="rcv-detail">${esc(c.detail)}</span>
+              </div>`).join('')}
+          </div>
+        </div>`).join('');
+      document.getElementById('readyContent').innerHTML = html +
+        `<div class="notice-box" style="margin-top:16px">${esc(res.summary || '')}</div>`;
+    }
+
+    async function runRecords() {
+      const btn = document.getElementById('recBtn');
+      const domain = document.getElementById('rDomain').value.trim();
+      if (!domain) { showToast(t('needDomain')); document.getElementById('rDomain').focus(); return; }
+      const ip = document.getElementById('rIP').value.trim();
+      const sel = document.getElementById('rSel').value.split(/[,\s]+/).map(x => x.trim()).filter(Boolean);
+
+      btn.disabled = true;
+      const old = btn.innerHTML;
+      btn.innerHTML = '<span class="spinner"></span> ' + t('btnChecking');
+      document.getElementById('readyCard').classList.add('hidden');
+      document.getElementById('dnsCard').classList.add('hidden');
+
+      try {
+        const resp = await fetch('/api/records', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain, ip, selectors: sel, lang: LANG }),
+        });
+        const txt = await resp.text();
+        if (!resp.ok) { let m = txt; try { m = JSON.parse(txt).error || txt; } catch (e) {} throw new Error(m); }
+        const res = JSON.parse(txt);
+        LAST_RECORDS = res;
+        renderReadiness(res);
+        renderDNS({ from: res.dns }, res.domain);
+        document.getElementById('readyCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (e) {
+        showToast(t('reqFail') + ': ' + e.message, 4000);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = old;
+      }
+    }
+    let LAST_RECORDS = null;
+
+
+    function fill(key) {
+        const p = PRESETS[key];
+        if (p.host) document.getElementById('host').value = p.host;
+        if (p.port) document.getElementById('port').value = p.port;
+        if (p.username) document.getElementById('username').value = p.username;
+        if (p.from) document.getElementById('from').value = p.from;
+    }
+
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function showToast(msg, ms=2000) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.classList.add('show');
+        setTimeout(() => t.classList.remove('show'), ms);
+    }
+
+    let stepIdx = 0;
+
+    function addStep(step) {
+        const pipeline = document.getElementById('pipeline');
+
+        // If a step with the same name exists and is "info", replace it
+        const existing = pipeline.querySelector(`[data-step-name="${CSS.escape(step.name)}"]`);
+        if (existing) {
+            existing.remove();
+            // Keep the same index to avoid animation jump
+        }
+
+        const statusIcon = ico(step.status === 'ok' ? 'check' : step.status === 'fail' ? 'x'
+            : step.status === 'warn' ? 'alert' : 'info', 12);
+        const cardClass = step.status === 'fail' ? 'fail-card' : step.status === 'warn' ? 'warn-card' : '';
+        const badgeClass = step.status === 'ok' ? 'badge-ok' : step.status === 'fail' ? 'badge-fail' : step.status === 'warn' ? 'badge-warn' : 'badge-info';
+        const statusLabel = step.status === 'ok' ? 'PASS' : step.status === 'fail' ? 'FAIL' : step.status === 'warn' ? 'WARN' : 'INFO';
+        const delay = stepIdx * 0.06;
+        stepIdx++;
+
+        let tipsHtml = '';
+        if (step.tips && step.tips.length > 0) {
+            tipsHtml = `<div class="step-tips">
+                <div class="step-tips-title">${ico('alert', 13)}<span>${t('tipsTitle')}</span></div>
+                <ul>${step.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+            </div>`;
+        }
+
+        let respHtml = '';
+        if (step.response) {
+            const uid = 'resp-' + stepIdx;
+            respHtml = `<div class="step-response-toggle" onclick="toggleResp('${uid}', this)">${ico('chevronR', 13)}<span>${t('showResp')}</span></div>
+                        <div class="step-response" id="${uid}">${esc(step.response)}</div>`;
+        }
+
+        const timingHtml = step.timing_ms > 0 ? `<span class="step-time">${step.timing_ms}ms</span>` : '';
+
+        const html = `<div class="step-node" data-step-name="${esc(step.name)}" style="animation-delay:${delay}s">
+            <div class="step-dot ${step.status}">${statusIcon}</div>
+            <div class="step-card ${cardClass}">
+                <div class="step-header">
+                    <span class="step-name">${esc(step.name)}${stepHints(step.name)}</span>
+                    <div class="step-meta">
+                        ${timingHtml}
+                        <span class="step-badge ${badgeClass}">${statusLabel}</span>
+                    </div>
+                </div>
+                <div class="step-detail">${esc(step.detail)}</div>
+                ${respHtml}
+                ${tipsHtml}
+            </div>
+        </div>`;
+
+        pipeline.insertAdjacentHTML('beforeend', html);
+        // Scroll into view
+        pipeline.lastElementChild.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function toggleResp(id, el) {
+        const resp = document.getElementById(id);
+        if (resp.classList.contains('show')) {
+            resp.classList.remove('show');
+            el.innerHTML = ico('chevronR', 13) + '<span>' + t('showResp') + '</span>';
+        } else {
+            resp.classList.add('show');
+            el.innerHTML = ico('chevronD', 13) + '<span>' + t('hideResp') + '</span>';
+        }
+    }
+
+    function renderTLS(cert) {
+        if (!cert) return;
+        const card = document.getElementById('tlsCard');
+        card.classList.remove('hidden');
+        const daysClass = cert.days_left < 30 ? 'cert-warn' : 'cert-ok';
+        const daysText = cert.days_left < 0 ? '已过期' : cert.days_left + ' 天';
+        const sans = (cert.sans || []).slice(0, 5).join(', ') || '无';
+        document.getElementById('tlsContent').innerHTML = `
+            <div class="cert-grid">
+                <div class="cert-label">域名</div><div class="cert-value">${esc(cert.subject)}</div>
+                <div class="cert-label">颁发者</div><div class="cert-value">${esc(cert.issuer)}</div>
+                <div class="cert-label">有效期</div><div class="cert-value">${esc(cert.not_before)} ~ ${esc(cert.not_after)}</div>
+                <div class="cert-label">剩余</div><div class="cert-value ${daysClass}">${daysText}</div>
+                <div class="cert-label">协议</div><div class="cert-value">${esc(cert.protocol)}</div>
+                <div class="cert-label">加密套件</div><div class="cert-value">${esc(cert.cipher)}</div>
+                <div class="cert-label">SAN</div><div class="cert-value">${esc(sans)}</div>
+            </div>`;
+    }
+
+    function renderExtensions(exts) {
+        if (!exts || exts.length === 0) return;
+        const card = document.getElementById('extCard');
+        card.classList.remove('hidden');
+        const chips = exts.map(e => {
+            const cls = KNOWN_EXTS.has(e.name) ? 'known' : '';
+            const val = e.value ? ` ${esc(e.value)}` : '';
+            return `<span class="ext-chip ${cls}" title="${esc(e.value || e.name)}">${esc(e.name)}${val}</span>`;
+        }).join('');
+        document.getElementById('extContent').innerHTML = `<div class="ext-grid">${chips}</div>`;
+    }
+
+    function renderDNS(dns, explicitDomain) {
+        if (!dns) return;
+        LAST_DNS = dns;
+        LAST_DOMAIN = explicitDomain || null;
+        const card = document.getElementById('dnsCard');
+        card.classList.remove('hidden');
+        let html = '';
+
+        for (const key of ['from', 'to']) {
+            const r = dns[key];
+            if (!r) continue;
+            const isSender = key === 'from';
+            let domain = LAST_DOMAIN || '';
+            if (!domain) {
+                const el = document.getElementById(isSender ? 'from' : 'to');
+                domain = ((el && el.value) || '').split('@')[1] || '';
+            }
+
+            html += `<div class="dns-block">
+                <div class="dns-domain-header">${isSender ? t('senderDomain') : t('recvDomain')}: ${esc(domain)}
+                    <span class="role-badge ${isSender ? 'role-send' : 'role-recv'}">${isSender ? 'SENDER' : 'RECIPIENT'}</span>
+                </div>
+                <div class="dns-note">${isSender ? t('roleSend') : t('roleRecv')}</div>`;
+
+            const has = a => a && a.length;
+
+            // MX —— 收件方必需；发件方缺失只影响收退信，不算错
+            html += dnsRow('MX' + hint('mx'),
+                has(r.mx) ? r.mx.join('\n') : t('notCfg'),
+                has(r.mx) ? 'pass' : (isSender ? 'na' : 'miss'));
+
+            // A —— 网站地址，与收发邮件无关，一律不判错
+            html += dnsRow('A' + hint('a'),
+                has(r.a) ? r.a.join(', ') : t('notCfg'), has(r.a) ? 'pass' : 'na');
+            if (has(r.aaaa)) html += dnsRow('AAAA', r.aaaa.join(', '), 'pass');
+
+            if (isSender) {
+                html += dnsRow('SPF' + hint('spf'), r.spf || t('notCfg'), r.spf ? 'pass' : 'miss');
+
+                const dk = r.dkim || [];
+                if (dk.length) {
+                    for (const d of dk) {
+                        html += dnsRow('DKIM (' + esc(d.selector) + ')' + hint('dkim'),
+                            d.record ? d.record.slice(0, 70) + '...' : t('notFound'), 'pass');
+                    }
+                } else {
+                    html += dnsRow('DKIM' + hint('dkim'), t('dkimNote'), 'na');
+                }
+
+                html += dnsRow('DMARC' + hint('dmarc'), r.dmarc || t('notCfg'), r.dmarc ? 'pass' : 'miss');
+                if (r.dmarc_policy) {
+                    const pol = r.dmarc_policy.toLowerCase();
+                    html += dnsRow('DMARC p=' + hint('dmarcPolicy'), r.dmarc_policy,
+                        pol === 'reject' ? 'pass' : pol === 'quarantine' ? 'pass' : 'na');
+                }
+            } else {
+                html += dnsRow('SPF' + hint('spf'), r.spf || t('naRecv'), r.spf ? 'pass' : 'na');
+                html += dnsRow('DMARC' + hint('dmarc'), r.dmarc || t('naRecv'), r.dmarc ? 'pass' : 'na');
+            }
+
+            // 现代传输安全策略：有则加分，没有不算错
+            const pol = r.policy || {};
+            html += dnsRow('MTA-STS' + hint('mtasts'), pol.mta_sts || t('notCfg'), pol.mta_sts ? 'pass' : 'na');
+            html += dnsRow('TLS-RPT' + hint('mtasts'), pol.tls_rpt || t('notCfg'), pol.tls_rpt ? 'pass' : 'na');
+            html += dnsRow('DANE (TLSA)' + hint('mtasts'), pol.dane ? 'TLSA' : t('notCfg'), pol.dane ? 'pass' : 'na');
+            if (isSender) html += dnsRow('BIMI' + hint('bimi'), pol.bimi || t('notCfg'), pol.bimi ? 'pass' : 'na');
+
+            html += '</div>';
+        }
+
+        document.getElementById('dnsContent').innerHTML = html;
+    }
+
+    function dnsRow(label, value, status) {
+        const glyph = ico(status === 'pass' ? 'check' : status === 'miss' ? 'x' : 'minus', 13);
+        return `<div class="dns-row">
+            <div class="dns-label">${label}</div>
+            <div class="dns-value">${esc(value)}</div>
+            <span class="dns-status ${status}" title="${status}">${glyph}</span>
+        </div>`;
+    }
+
+    async function runTest() {
+        const btn = document.getElementById('testBtn');
+        const data = {
+            host: document.getElementById('host').value.trim(),
+            port: parseInt(document.getElementById('port').value),
+            username: document.getElementById('username').value.trim(),
+            password: document.getElementById('password').value.trim(),
+            from: document.getElementById('from').value.trim(),
+            to: document.getElementById('to').value.trim(),
+            dry_run: document.getElementById('dryRun').checked,
+            insecure_tls: document.getElementById('insecureTLS').checked,
+            lang: LANG,
+        };
+
+        for (const [k, v] of Object.entries(data)) {
+            if (typeof v === 'string' && !v) {
+                showToast(t('needFields'));
+                document.getElementById(k).focus();
+                return;
+            }
+        }
+
+        // Reset UI
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> ' + t('btnRunning');
+        const area = document.getElementById('resultsArea');
+        area.classList.remove('hidden');
+        document.getElementById('pipeline').innerHTML = '';
+        document.getElementById('summary').innerHTML = '';
+        document.getElementById('timer').textContent = '';
+        document.getElementById('tlsCard').classList.add('hidden');
+        document.getElementById('extCard').classList.add('hidden');
+        document.getElementById('dnsCard').classList.add('hidden');
+        stepIdx = 0;
+
+        const startTime = Date.now();
+        const timerInterval = setInterval(() => {
+            document.getElementById('timer').textContent = `${t('elapsed')} ${((Date.now() - startTime) / 1000).toFixed(1)}s`;
+        }, 100);
+
+        try {
+            const resp = await fetch('/api/test-stream', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data),
+            });
+
+            if (!resp.ok) {
+                const errText = await resp.text();
+                throw new Error(errText || 'HTTP ' + resp.status);
+            }
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
+
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    try {
+                        const evt = JSON.parse(line.slice(6));
+                        if (evt.type === 'step') {
+                            addStep(evt.data);
+                        } else if (evt.type === 'tls') {
+                            renderTLS(evt.data);
+                        } else if (evt.type === 'extensions') {
+                            renderExtensions(evt.data);
+                        } else if (evt.type === 'dns') {
+                            renderDNS(evt.data);
+                        } else if (evt.type === 'done') {
+                            const result = evt.data;
+                            clearInterval(timerInterval);
+                            document.getElementById('timer').textContent = `${t('doneIn')} ${result.total_ms}ms`;
+                            const failed = (result.steps || []).filter(s => s.status === 'fail');
+                            const summaryDiv = document.getElementById('summary');
+                            if (failed.length > 0) {
+                                summaryDiv.innerHTML = `<div class="summary-box fail">${esc(failed[0].name)} ${t('failedAt')}: ${esc(failed[0].detail)}</div>`;
+                            } else {
+                                summaryDiv.innerHTML = `<div class="summary-box ok">${t('allPass')}</div>`;
+                            }
+                        }
+                    } catch (e) {
+                        // skip malformed lines
+                    }
+                }
+            }
+        } catch (e) {
+            clearInterval(timerInterval);
+            document.getElementById('pipeline').innerHTML = `<div style="color:var(--fail);text-align:center;padding:24px;">${t('reqFail')}: ${esc(e.message)}</div>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = t('btnRun');
+        }
+    }
+
+    setLang(LANG);
+    setMode(MODE);
+
+    // Enter to submit
+    document.querySelectorAll('input').forEach(el => {
+        el.addEventListener('keydown', e => {
+            if (e.key !== 'Enter') return;
+            if (MODE === 'records' || el.closest('#recordsPane')) runRecords(); else runTest();
+        });
+    });
+    </script>
+</body>
+</html>

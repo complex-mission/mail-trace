@@ -1,0 +1,16 @@
+# 构建产物
+mail-trace
+mail-trace.exe
+*.exe~
+dist/
+
+# 本地配置（含 Redis 连接串等）
+.env
+.env.local
+
+# 编辑器 / 工具
+.idea/
+.vscode/
+.mimocode/
+*.swp
+.DS_Store
