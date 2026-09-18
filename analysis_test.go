@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"testing"
 
 	"github.com/miekg/dns"
@@ -13,6 +12,7 @@ import (
 func TestStepsRecorded(t *testing.T) {
 	emitted := 0
 	res := testSMTPStream(
+		t.Context(),
 		Config{Host: "192.0.2.1", Port: 587, Username: "u", Password: "p", From: "a@b.com", To: "c@d.com"},
 		func(Step) { emitted++ },
 	)
@@ -68,7 +68,7 @@ func TestReverseIP(t *testing.T) {
 // TestCheckDNSBLRejectsBadIP：构造不出查询名时必须显式报错，
 // 不能返回一串默认的 clean 让用户以为 IP 是干净的。
 func TestCheckDNSBLRejectsBadIP(t *testing.T) {
-	for _, r := range CheckDNSBL(context.Background(), "not-an-ip") {
+	for _, r := range CheckDNSBL(t.Context(), "not-an-ip") {
 		if r.Kind != dnsblError {
 			t.Errorf("%s: kind = %q, 期望 %q", r.Blacklist, r.Kind, dnsblError)
 		}

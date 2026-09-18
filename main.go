@@ -9,18 +9,22 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"html"
 	"io"
+	"log"
 	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"net/textproto"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -156,7 +160,7 @@ func qpEncode(s string) string {
 	return buf.String()
 }
 
-func NewSMTPConn(host string, port int, useSSL bool, insecureTLS bool) (*SMTPConn, error) {
+func NewSMTPConn(ctx context.Context, host string, port int, useSSL bool, insecureTLS bool) (*SMTPConn, error) {
 	// 必须用 JoinHostPort：IPv6 字面量要加方括号，直接拼 "%s:%d" 会拼出非法地址
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	var conn net.Conn
@@ -165,12 +169,13 @@ func NewSMTPConn(host string, port int, useSSL bool, insecureTLS bool) (*SMTPCon
 	// Control 钩子在 connect 之前拿到最终 IP 再查一遍，挡住 DNS rebinding
 	dialer := &net.Dialer{Timeout: 15 * time.Second, Control: dialControl}
 	if useSSL {
-		conn, err = tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		td := &tls.Dialer{NetDialer: dialer, Config: &tls.Config{
 			MinVersion:         tls.VersionTLS10,
 			InsecureSkipVerify: insecureTLS,
-		})
+		}}
+		conn, err = td.DialContext(ctx, "tcp", addr)
 	} else {
-		conn, err = dialer.Dial("tcp", addr)
+		conn, err = dialer.DialContext(ctx, "tcp", addr)
 	}
 	if err != nil {
 		return nil, err
@@ -729,7 +734,7 @@ func getTLSCertInfo(conn *tls.ConnectionState) *TLSCertInfo {
 
 type StepWriter func(Step)
 
-func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
+func testSMTPStream(ctx context.Context, cfg Config, rawEmit StepWriter) *TestResult {
 	lang := L(cfg.Lang)
 	result := &TestResult{DNS: make(map[string]*DNSResult)}
 	start := time.Now()
@@ -740,6 +745,19 @@ func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 	emit := func(s Step) {
 		result.Steps = append(result.Steps, s)
 		rawEmit(s)
+	}
+
+	// aborted 在用户关掉页面后为真。没有这个检查，一次被放弃的诊断仍会跑完
+	// 整条 SMTP 会话和后面上百次 DNS 查询 —— 刷新几次页面就能把出站配额打满。
+	aborted := func() bool {
+		select {
+		case <-ctx.Done():
+			result.Summary = lang.T("请求已取消", "request cancelled")
+			result.TotalMs = time.Since(start).Milliseconds()
+			return true
+		default:
+			return false
+		}
 	}
 
 	port := cfg.Port
@@ -763,7 +781,7 @@ func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 
 	// ── Step 2: TCP Connect ──
 	connStart := time.Now()
-	conn, err := NewSMTPConn(host, port, useSSL, cfg.InsecureTLS)
+	conn, err := NewSMTPConn(ctx, host, port, useSSL, cfg.InsecureTLS)
 	connMs := time.Since(connStart).Milliseconds()
 	if err != nil {
 		emit(Step{
@@ -815,6 +833,11 @@ func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 		conn.Close()
 		result.Summary = lang.F("服务器拒绝连接: %s", "server refused the connection: %s", bannerMsg)
 		result.TotalMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	if aborted() {
+		conn.Close()
 		return result
 	}
 
@@ -1013,6 +1036,12 @@ func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 		}
 	}
 
+	if aborted() {
+		conn.SendCommand("QUIT")
+		conn.Close()
+		return result
+	}
+
 	// ── Step 7: MAIL FROM ──
 	fromStart := time.Now()
 	fromCode, fromMsg, _ := conn.SendCommand(fmt.Sprintf("MAIL FROM:<%s>", cfg.From))
@@ -1055,6 +1084,12 @@ func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 		conn.Close()
 		result.Summary = lang.F("RCPT TO 被拒绝: %s", "RCPT TO rejected: %s", rcptMsg)
 		result.TotalMs = time.Since(start).Milliseconds()
+		return result
+	}
+
+	if aborted() {
+		conn.SendCommand("QUIT")
+		conn.Close()
 		return result
 	}
 
@@ -1305,6 +1340,10 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 所有下游 context 都挂在请求上：客户端一断开，SMTP 会话和
+	// 后面的 DNSBL / DNS / PTR / SPF 查询全部随之取消。
+	reqCtx := r.Context()
+
 	result := &TestResult{DNS: make(map[string]*DNSResult)}
 
 	emit := func(step Step) {
@@ -1314,7 +1353,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Run the test
-	testResult := testSMTPStream(cfg, emit)
+	testResult := testSMTPStream(reqCtx, cfg, emit)
 	result.Steps = testResult.Steps
 	result.Summary = testResult.Summary
 	result.TotalMs = testResult.TotalMs
@@ -1350,7 +1389,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 		emit(Step{Name: lang.T("DNSBL 黑名单", "DNSBL Blocklists"), Status: "info", Detail: lang.F("正在查询发送 IP %s 的黑名单状态...", "checking blocklist status for sending IP %s...", result.ServerIP)})
 		go func() {
 			start := time.Now()
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(reqCtx, 10*time.Second)
 			defer cancel()
 			res := CheckDNSBL(ctx, result.ServerIP)
 			dnsblCh <- dnsblOut{results: res, elapsed: time.Since(start).Milliseconds()}
@@ -1362,7 +1401,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 	emit(Step{Name: lang.T("DNS 记录检查", "DNS Records"), Status: "info", Detail: lang.F("正在解析 %s 和 %s 的 DNS 记录...", "resolving DNS records for %s and %s...", fromDomain, toDomain)})
 	go func() {
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(reqCtx, 10*time.Second)
 		defer cancel()
 		var wg sync.WaitGroup
 		var mu sync.Mutex
@@ -1468,7 +1507,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 	// ── 发信 IP 反向解析 (PTR / FCrDNS) ──
 	// 查的是实际建连的那个 IP，不是域名的 A 记录
 	if result.ServerIP != "" {
-		ctxPTR, cancelPTR := context.WithTimeout(context.Background(), 6*time.Second)
+		ctxPTR, cancelPTR := context.WithTimeout(reqCtx, 6*time.Second)
 		info := checkSendingIP(ctxPTR, result.ServerIP)
 		cancelPTR()
 		info.HELOHost = getHostname()
@@ -1508,7 +1547,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 	// ── SPF 求值 ──
 	// 真正展开 include/redirect 判断发信 IP 是否被授权，而不是只看记录存不存在
 	{
-		ctxSPF, cancelSPF := context.WithTimeout(context.Background(), 8*time.Second)
+		ctxSPF, cancelSPF := context.WithTimeout(reqCtx, 8*time.Second)
 		if provider != nil {
 			// 走中继：出口 IP 是服务商的池子，该验的是 SPF 里有没有包含服务商
 			ev := &SPFEval{Domain: fromDomain, IP: result.ServerIP}
@@ -1656,7 +1695,7 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 步骤由 testSMTPStream 自己记进 result.Steps，这里不需要额外收集
-	result := testSMTPStream(cfg, func(Step) {})
+	result := testSMTPStream(r.Context(), cfg, func(Step) {})
 
 	fromDomain := cfg.From[strings.Index(cfg.From, "@")+1:]
 	toDomain := cfg.To[strings.Index(cfg.To, "@")+1:]
@@ -1722,14 +1761,14 @@ func rateLimitMiddleware(rl *RateLimiter, next http.HandlerFunc) http.HandlerFun
 			next(w, r)
 			return
 		}
-		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if ip == "" {
-			ip = "unknown"
-		}
-		ctx := context.Background()
-		allowed, remaining, err := rl.Allow(ctx, ip)
+		// 必须按真实客户端 IP 计数。直接用 RemoteAddr，在反向代理后面会让
+		// 所有用户共用代理那一个桶，限流等于没开。
+		ip := ClientIP(r)
+		allowed, remaining, err := rl.Allow(r.Context(), ip)
 		if err != nil {
-			// Redis error: fail open
+			// Redis 故障时放行而不是拒服务，但必须留下痕迹：
+			// 静默 fail-open 意味着限流可能已经停了好几天而没人知道。
+			log.Printf("限流查询失败，本次放行: %v", err)
 			next(w, r)
 			return
 		}
@@ -1751,6 +1790,9 @@ func rateLimitMiddleware(rl *RateLimiter, next http.HandlerFunc) http.HandlerFun
 
 // ── Main ───────────────────────────────────────────────────────────────────────
 
+// version 由构建时注入：go build -ldflags "-X main.version=v1.2.3"
+var version = "dev"
+
 func main() {
 	// Load .env (ignore error if file doesn't exist)
 	godotenv.Load()
@@ -1759,9 +1801,23 @@ func main() {
 	if v := os.Getenv("LISTEN"); v != "" {
 		listen = v
 	}
-	if len(os.Args) > 1 {
-		listen = os.Args[1]
+
+	flagListen := flag.String("listen", "", "监听地址，如 127.0.0.1:9013（覆盖 LISTEN 环境变量）")
+	showVersion := flag.Bool("version", false, "打印版本后退出")
+	flag.Parse()
+	if *showVersion {
+		fmt.Printf("mail-trace %s\n", version)
+		return
 	}
+	if *flagListen != "" {
+		listen = *flagListen
+	}
+	// 兼容旧用法：第一个位置参数就是监听地址
+	if args := flag.Args(); len(args) > 0 {
+		listen = args[0]
+	}
+
+	log.SetFlags(log.LstdFlags)
 
 	// Redis rate limiter (optional)
 	var rl *RateLimiter
@@ -1772,9 +1828,11 @@ func main() {
 			os.Exit(1)
 		}
 		rdb := redis.NewClient(opts)
-		ctx := context.Background()
-		if err := rdb.Ping(ctx).Err(); err != nil {
-			fmt.Printf("Redis 连接失败，限流已跳过: %v\n", err)
+		pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+		err = rdb.Ping(pingCtx).Err()
+		cancelPing()
+		if err != nil {
+			log.Printf("Redis 连接失败，限流已跳过: %v", err)
 		} else {
 			maxReq := 10
 			if v := os.Getenv("RATE_LIMIT_MAX"); v != "" {
@@ -1789,42 +1847,64 @@ func main() {
 				}
 			}
 			rl = NewRateLimiter(rdb, maxReq, window)
-			fmt.Printf("Redis 限流已启用: %d 次 / %s\n", maxReq, window)
+			log.Printf("Redis 限流已启用: %d 次 / %s", maxReq, window)
 		}
 	} else {
-		fmt.Printf("未配置 REDIS_URL，限流已跳过\n")
+		log.Printf("未配置 REDIS_URL，限流已跳过")
+	}
+	if len(trustedProxies) > 0 {
+		log.Printf("已配置 %d 个可信代理网段，限流将采信 X-Forwarded-For", len(trustedProxies))
+	} else {
+		log.Printf("未配置 MAIL_TRACE_TRUSTED_PROXIES，限流按 RemoteAddr 计数" +
+			"（反向代理后面务必配置，否则所有用户共用一个桶）")
 	}
 
-	http.HandleFunc("/", handleIndex)
+	// 诊断类接口既开 SMTP 连接又打上百次 DNS 查询，必须有并发闸门。
+	// 限流是可选的、且 Redis 故障时放行，这里才是兜底。
+	busy := newInFlight(envInt("MAX_CONCURRENT", 32))
 
-	testStream := handleTestSSE
-	testJSON := handleTest
-	if rl != nil {
-		testStream = rateLimitMiddleware(rl, handleTestSSE)
-		testJSON = rateLimitMiddleware(rl, handleTest)
+	// 用独立的 mux，不碰 http.DefaultServeMux：任何被链接进来的库
+	// 都可能往默认 mux 上注册路由（net/http/pprof 就是典型）。
+	mux := http.NewServeMux()
+
+	// chain 按「限流 → 并发闸门 → 业务」的顺序包装，最外层统一记访问日志。
+	chain := func(h http.HandlerFunc, heavy bool) http.HandlerFunc {
+		if heavy {
+			h = busy.guard(h)
+		}
+		if rl != nil {
+			h = rateLimitMiddleware(rl, h)
+		}
+		return withLogging(h)
 	}
-	http.HandleFunc("/api/test", testJSON)
-	http.HandleFunc("/api/test-stream", testStream)
 
+	mux.HandleFunc("/", withLogging(handleIndex))
+	mux.HandleFunc("/api/test", chain(handleTest, true))
+	mux.HandleFunc("/api/test-stream", chain(handleTestSSE, true))
 	// 仅查记录，不需要凭据、不建立 SMTP 会话
-	recordsJSON := handleRecords
-	if rl != nil {
-		recordsJSON = rateLimitMiddleware(rl, handleRecords)
-	}
-	http.HandleFunc("/api/records", recordsJSON)
+	mux.HandleFunc("/api/records", chain(handleRecords, true))
 
 	// SEO / AI 抓取
-	http.HandleFunc("/robots.txt", handleRobots)
-	http.HandleFunc("/sitemap.xml", handleSitemap)
-	http.HandleFunc("/llms.txt", handleLLMs)
-	http.HandleFunc("/og.svg", handleOGImage)
+	mux.HandleFunc("/robots.txt", withLogging(handleRobots))
+	mux.HandleFunc("/sitemap.xml", withLogging(handleSitemap))
+	mux.HandleFunc("/llms.txt", withLogging(handleLLMs))
+	mux.HandleFunc("/og.svg", withLogging(handleOGImage))
 
-	fmt.Printf("Mail Trace 邮件链路诊断工具 已启动\n")
-	fmt.Printf("访问地址: http://%s\n", listen)
-	fmt.Printf("按 Ctrl+C 退出\n\n")
+	srv := newServer(listen, mux)
 
-	if err := http.ListenAndServe(listen, nil); err != nil {
-		fmt.Fprintf(os.Stderr, "启动失败: %v\n", err)
+	sigCtx, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	done := make(chan struct{})
+	go func() {
+		shutdownOnSignal(sigCtx, srv, 90*time.Second)
+		close(done)
+	}()
+
+	log.Printf("Mail Trace %s 已启动，监听 http://%s（Ctrl+C 退出）", version, listen)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("启动失败: %v", err)
 		os.Exit(1)
 	}
+	<-done
+	log.Printf("已退出")
 }
