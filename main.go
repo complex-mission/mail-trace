@@ -1763,7 +1763,7 @@ func rateLimitMiddleware(rl *RateLimiter, next http.HandlerFunc) http.HandlerFun
 		if err != nil {
 			// Redis 故障时放行而不是拒服务，但必须留下痕迹：
 			// 静默 fail-open 意味着限流可能已经停了好几天而没人知道。
-			log.Printf("限流查询失败，本次放行: %v", err)
+			log.Printf("rate-limit lookup failed, allowing this request: %v", err)
 			next(w, r)
 			return
 		}
@@ -1811,14 +1811,14 @@ func loadDotEnv() {
 			continue
 		}
 		if err := godotenv.Load(p); err != nil {
-			log.Printf("警告: 读取 %s 失败: %v", p, err)
+			log.Printf("warning: could not read %s: %v", p, err)
 			continue
 		}
-		log.Printf("已加载配置文件 %s", p)
+		log.Printf("loaded config file %s", p)
 		return
 	}
-	log.Printf("未找到 .env（已查找: %s），配置全部取自环境变量或默认值",
-		strings.Join(candidates, "、"))
+	log.Printf("no .env found (looked in: %s); configuration comes entirely from the environment or defaults",
+		strings.Join(candidates, ", "))
 }
 
 func main() {
@@ -1862,7 +1862,7 @@ func main() {
 		err = rdb.Ping(pingCtx).Err()
 		cancelPing()
 		if err != nil {
-			log.Printf("Redis 连接失败，限流已跳过: %v", err)
+			log.Printf("Redis connection failed, rate limiting is off: %v", err)
 		} else {
 			maxReq := 10
 			if v := os.Getenv("RATE_LIMIT_MAX"); v != "" {
@@ -1877,16 +1877,16 @@ func main() {
 				}
 			}
 			rl = NewRateLimiter(rdb, maxReq, window)
-			log.Printf("Redis 限流已启用: %d 次 / %s", maxReq, window)
+			log.Printf("rate limiting enabled via Redis: %d requests / %s", maxReq, window)
 		}
 	} else {
-		log.Printf("未配置 REDIS_URL，限流已跳过")
+		log.Printf("REDIS_URL is not set, rate limiting is off")
 	}
 	if len(trustedProxies) > 0 {
-		log.Printf("已配置 %d 个可信代理网段，限流将采信 X-Forwarded-For", len(trustedProxies))
+		log.Printf("%d trusted proxy range(s) configured; X-Forwarded-For will be honoured", len(trustedProxies))
 	} else {
-		log.Printf("未配置 MAIL_TRACE_TRUSTED_PROXIES，限流按 RemoteAddr 计数" +
-			"（反向代理后面务必配置，否则所有用户共用一个桶）")
+		log.Printf("MAIL_TRACE_TRUSTED_PROXIES is not set; rate limiting counts RemoteAddr " +
+			"(set it behind a reverse proxy, or every visitor shares one bucket)")
 	}
 
 	// 诊断类接口既开 SMTP 连接又打上百次 DNS 查询，必须有并发闸门。
@@ -1931,11 +1931,11 @@ func main() {
 		close(done)
 	}()
 
-	log.Printf("Mail Trace %s 已启动，监听 http://%s（Ctrl+C 退出）", version, listen)
+	log.Printf("Mail Trace %s listening on http://%s (Ctrl+C to stop)", version, listen)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Printf("启动失败: %v", err)
+		log.Printf("failed to start: %v", err)
 		os.Exit(1)
 	}
 	<-done
-	log.Printf("已退出")
+	log.Printf("stopped")
 }

@@ -141,16 +141,17 @@ timeout 5 bash -c 'cat < /dev/null > /dev/tcp/smtp.qq.com/465' \
 忽略这件事，就是在这里暴露出来的：
 
 ```
-Redis 限流已启用: 10 次 / 1m0s
-已配置 2 个可信代理网段，限流将采信 X-Forwarded-For
-Mail Trace v1.0.0 已启动，监听 http://127.0.0.1:9013
+loaded config file /www/wwwroot/mail-trace/.env
+rate limiting enabled via Redis: 10 requests / 1m0s
+2 trusted proxy range(s) configured; X-Forwarded-For will be honoured
+Mail Trace v1.0.0 listening on http://127.0.0.1:9013 (Ctrl+C to stop)
 ```
 
 如果看到的是下面这两行，说明对应配置没生效：
 
 ```
-未配置 REDIS_URL，限流已跳过
-未配置 MAIL_TRACE_TRUSTED_PROXIES，限流按 RemoteAddr 计数（...）
+REDIS_URL is not set, rate limiting is off
+MAIL_TRACE_TRUSTED_PROXIES is not set; rate limiting counts RemoteAddr (...)
 ```
 
 然后端到端验一遍行为：
@@ -178,12 +179,12 @@ done; echo
 # 说明可信代理配错了
 
 # 5. 优雅退出确实走到了（重启服务后查日志）
-#    应看到：收到退出信号，停止接受新请求，最多等待 ...
+#    应看到：stop signal received; no longer accepting requests ...
 ```
 
 ## 运维须知
 
-- **限流故障时放行。** Redis 不可达时服务会记 `限流查询失败，本次放行`
+- **限流故障时放行。** Redis 不可达时服务会记 `rate-limit lookup failed, allowing this request`
   并照常处理请求。此时兜底的是 `MAX_CONCURRENT`。
 - **DNSBL 结果的可信度取决于解析器。** 走公共解析器时 Spamhaus 返回
   `127.255.255.x`，工具会如实报「查询被拒，结果不可信」，而不是假装成命中。

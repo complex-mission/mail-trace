@@ -1,35 +1,35 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mail Trace — 邮件发送链路诊断 | SMTP · SPF · DKIM · DMARC · PTR 一次测完</title>
-    <meta name="description" content="开源的邮件送达率诊断工具：真实跑一次 SMTP 会话，逐跳显示 DNS、TCP、TLS、认证、MAIL FROM、RCPT TO、DATA，并按 RFC 7208 完整求值 SPF、检查发信 IP 的 PTR/FCrDNS、区分 Spamhaus SBL 与 PBL 返回码。凭据不落盘、不记录。">
-    <meta name="keywords" content="SMTP 测试,邮件送达率,SPF 检测,DKIM,DMARC,PTR 反向解析,DNSBL,Spamhaus PBL,邮件进垃圾箱,mail deliverability,SMTP diagnostics">
+    <title>Mail Trace — Mail Delivery Diagnostics | SMTP · SPF · DKIM · DMARC · PTR in one pass</title>
+    <meta name="description" content="Open-source mail deliverability diagnostics. Opens a real SMTP session and records every hop — DNS, TCP, TLS, AUTH, MAIL FROM, RCPT TO, DATA — while fully evaluating SPF per RFC 7208, checking the sending IP's PTR/FCrDNS, and telling Spamhaus SBL and PBL return codes apart. Credentials are never persisted or logged.">
+    <meta name="keywords" content="mail deliverability,SMTP diagnostics,SPF evaluation,DKIM,DMARC,PTR reverse DNS,FCrDNS,DNSBL,Spamhaus PBL,email in spam,SMTP 测试,邮件送达率,SPF 检测,邮件进垃圾箱">
     <meta name="author" content="complex mission">
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
     <link rel="canonical" href="https://mail-trace.complexmission.com/">
-    <link rel="alternate" hreflang="zh-Hans" href="https://mail-trace.complexmission.com/?lang=zh">
     <link rel="alternate" hreflang="en" href="https://mail-trace.complexmission.com/?lang=en">
+    <link rel="alternate" hreflang="zh-Hans" href="https://mail-trace.complexmission.com/?lang=zh">
     <link rel="alternate" hreflang="x-default" href="https://mail-trace.complexmission.com/">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'><defs><linearGradient id='g' x1='4' y1='8' x2='44' y2='42' gradientUnits='userSpaceOnUse'><stop stop-color='%235b9cf6'/><stop offset='0.55' stop-color='%238b7df6'/><stop offset='1' stop-color='%23d67df6'/></linearGradient></defs><rect x='1' y='1' width='46' height='46' rx='11' fill='%230f1420'/><rect x='6.5' y='16' width='27' height='22' rx='6' fill='none' stroke='url(%23g)' stroke-width='3'/><path d='M11.5 21.5 20 29l8.5-7.5 11-9' fill='none' stroke='url(%23g)' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/><circle cx='39.5' cy='12.5' r='4.2' fill='%230f1420' stroke='url(%23g)' stroke-width='3'/></svg>">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Mail Trace">
     <meta property="og:url" content="https://mail-trace.complexmission.com/">
-    <meta property="og:title" content="Mail Trace — 邮件发送链路诊断">
-    <meta property="og:description" content="真实跑一次 SMTP 会话，逐跳定位邮件发不出去或进垃圾箱的原因。完整 SPF 求值、发信 IP 的 PTR 检查、Spamhaus 返回码分类。开源，凭据不落盘。">
+    <meta property="og:title" content="Mail Trace — Mail Delivery Diagnostics">
+    <meta property="og:description" content="Opens a real SMTP session and pinpoints, hop by hop, why mail fails to send or lands in spam. Full SPF evaluation, PTR checks on the sending IP, Spamhaus return codes classified. Open source; credentials are never persisted.">
     <meta property="og:image" content="https://mail-trace.complexmission.com/og.png">
     <meta property="og:image:type" content="image/png">
     <meta property="og:image:width" content="1200">
     <meta property="og:image:height" content="630">
-    <meta property="og:image:alt" content="Mail Trace — 邮件发送全链路诊断">
-    <meta property="og:locale" content="zh_CN">
-    <meta property="og:locale:alternate" content="en_US">
+    <meta property="og:image:alt" content="Mail Trace — end-to-end mail delivery diagnostics">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="zh_CN">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Mail Trace — 邮件发送链路诊断">
-    <meta name="twitter:description" content="逐跳诊断 SMTP 投递链路：SPF 完整求值、PTR/FCrDNS、DNSBL 返回码分类。开源自建。">
+    <meta name="twitter:title" content="Mail Trace — Mail Delivery Diagnostics">
+    <meta name="twitter:description" content="Trace every SMTP hop: full SPF evaluation, PTR/FCrDNS, DNSBL return codes classified. Open source, self-hostable.">
     <meta name="twitter:image" content="https://mail-trace.complexmission.com/og.png">
-    <meta name="twitter:image:alt" content="Mail Trace — 邮件发送全链路诊断">
+    <meta name="twitter:image:alt" content="Mail Trace — end-to-end mail delivery diagnostics">
     <meta name="theme-color" content="#0f1420">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -39,15 +39,15 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Mail Trace",
-  "alternateName": "邮件链路诊断",
+  "alternateName": "Mail Delivery Diagnostics",
   "url": "https://mail-trace.complexmission.com/",
   "applicationCategory": "DeveloperApplication",
   "applicationSubCategory": "Email deliverability diagnostics",
   "operatingSystem": "Any (web browser)",
-  "description": "开源的邮件送达率诊断工具。真实建立一次 SMTP 会话逐跳定位问题，并提供无需凭据的 DNS 记录检测模式：按 RFC 7208 完整求值 SPF、检查发信 IP 的 PTR 与 FCrDNS、按返回码区分 DNSBL 的垃圾源列表与策略列表，并核对 Gmail、Yahoo、Microsoft 的发件人准入要求。",
+  "description": "Open-source mail deliverability diagnostics. Opens a real SMTP session to locate faults hop by hop, plus a credential-free records mode: full SPF evaluation per RFC 7208, PTR and FCrDNS checks on the sending IP, DNSBL return codes classified into spam-source and policy listings, and the sender requirements of Gmail, Yahoo and Microsoft checked line by line.",
   "inLanguage": [
-    "zh-Hans",
-    "en"
+    "en",
+    "zh-Hans"
   ],
   "isAccessibleForFree": true,
   "offers": {
@@ -59,14 +59,14 @@
   "codeRepository": "https://github.com/complex-mission/mail-trace",
   "softwareHelp": "https://mail-trace.complexmission.com/llms.txt",
   "featureList": [
-    "逐跳 SMTP 会话诊断：DNS、TCP、TLS/STARTTLS、AUTH、MAIL FROM、RCPT TO、DATA",
-    "SPF 完整求值（RFC 7208），递归展开 include/redirect/a/mx，统计 10 次查询上限",
-    "发信 IP 的 PTR 与 FCrDNS 检查",
-    "DNSBL 返回码分类：垃圾源列表、策略列表 PBL、查询被拒",
-    "DKIM 选择器探测与 DMARC 策略解析",
-    "MTA-STS、TLS-RPT、BIMI、DANE 检查",
-    "Gmail / Yahoo / Microsoft / 国内收件方准入要求核对",
-    "中英双语界面"
+    "Hop-by-hop SMTP session diagnostics: DNS, TCP, TLS/STARTTLS, AUTH, MAIL FROM, RCPT TO, DATA",
+    "Full SPF evaluation (RFC 7208), recursively expanding include/redirect/a/mx against the 10-lookup limit",
+    "PTR and FCrDNS checks on the sending IP",
+    "DNSBL return codes classified: spam-source lists, PBL policy lists, refused queries",
+    "DKIM selector probing and DMARC policy parsing",
+    "MTA-STS, TLS-RPT, BIMI and DANE checks",
+    "Sender requirements of Gmail / Yahoo / Microsoft / Chinese receivers checked line by line",
+    "Bilingual interface (English and Simplified Chinese)"
   ],
   "author": {
     "@type": "Organization",

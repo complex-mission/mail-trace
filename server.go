@@ -160,7 +160,7 @@ func envInt(key string, def int) int {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
 			return n
 		}
-		log.Printf("警告: %s=%q 不是合法的非负整数，用默认值 %d", key, os.Getenv(key), def)
+		log.Printf("warning: %s=%q is not a valid non-negative integer, using the default %d", key, os.Getenv(key), def)
 	}
 	return def
 }
@@ -184,11 +184,11 @@ func newServer(addr string, h http.Handler) *http.Server {
 // 并给进行中的诊断留出收尾时间（SMTP 会话中途被砍会在对端留下半截事务）。
 func shutdownOnSignal(ctx context.Context, srv *http.Server, grace time.Duration) {
 	<-ctx.Done()
-	log.Printf("收到退出信号，停止接受新请求，最多等待 %s 让进行中的诊断收尾", grace)
+	log.Printf("stop signal received; no longer accepting requests, waiting up to %s for in-flight diagnostics", grace)
 	shutCtx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
-		log.Printf("优雅退出超时，强制关闭: %v", err)
+		log.Printf("graceful shutdown timed out, forcing close: %v", err)
 		srv.Close()
 	}
 }

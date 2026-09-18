@@ -82,39 +82,49 @@ func handleLLMs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	fmt.Fprintf(w, `# Mail Trace
 
-> 开源的邮件送达率诊断工具。真实建立一次 SMTP 会话，逐跳定位邮件发不出去或进垃圾箱的原因。
 > An open-source mail deliverability diagnostic. Opens a real SMTP session and pinpoints, hop by hop,
 > why mail fails to send or lands in spam.
+> 开源的邮件送达率诊断工具。真实建立一次 SMTP 会话，逐跳定位邮件发不出去或进垃圾箱的原因。
 
-- 站点 / Site: %s
-- 源码 / Source: %s (MIT)
-- 语言 / Languages: 简体中文, English
+- Site / 站点: %s
+- Source / 源码: %s (MIT)
+- Languages / 语言: English, 简体中文
 
-## 它做什么 / What it checks
+## What it checks / 它做什么
 
-1. DNS 解析、TCP 连接、SSL/TLS 或 STARTTLS 握手、SMTP 认证、MAIL FROM、RCPT TO、DATA，逐跳给出耗时与服务器原始应答。
-2. SPF：按 RFC 7208 完整求值，递归展开 include / redirect / a / mx / ip4 / ip6 / exists，
-   判断实际发信 IP 是否被授权，识别 -all / ~all / ?all 的后果，并统计 10 次 DNS 查询上限。
-3. 发信 IP 的反向解析：检查实际建立 SMTP 连接的那个 IP 的 PTR 记录与 FCrDNS 闭环，
-   而不是域名 A 记录的 PTR（后者指向网站，与发信无关）。
-4. DNSBL：查询 Spamhaus ZEN、SpamCop、Barracuda、PSBL、UCEPROTECT，并按返回码分三类——
-   垃圾源列表（127.0.0.2-.9）、策略列表 PBL（127.0.0.10/.11）、查询被拒（127.255.255.x）。
-5. DKIM 选择器探测、DMARC 记录与策略、MTA-STS、TLS-RPT、BIMI、DANE。
-6. 服务商识别：走第三方提交服务器时，SPF 与 DNSBL 改按服务商出口 IP 的口径判定。
+1. DNS resolution, TCP connect, SSL/TLS or STARTTLS handshake, SMTP authentication, MAIL FROM,
+   RCPT TO and DATA, each with its latency and the raw server reply.
+2. SPF: evaluated in full per RFC 7208, recursively expanding include / redirect / a / mx / ip4 /
+   ip6 / exists to decide whether the actual sending IP is authorized, identifying the consequences
+   of -all / ~all / ?all, and counting against the 10-lookup limit.
+3. Reverse DNS of the sending IP: the PTR record and FCrDNS round-trip of the IP that actually
+   opened the SMTP connection, not the PTR of the domain's A record (which points at a web server
+   and has nothing to do with sending mail).
+4. DNSBL: queries Spamhaus ZEN, SpamCop, Barracuda, PSBL and UCEPROTECT, classifying return codes
+   into three kinds - spam-source listings (127.0.0.2-.9), the PBL policy list (127.0.0.10/.11),
+   and refused queries (127.255.255.x).
+5. DKIM selector probing, DMARC record and policy, MTA-STS, TLS-RPT, BIMI, DANE.
+6. Provider detection: when submitting through a third party, SPF and DNSBL are judged against the
+   provider's egress pool rather than the submission host.
 
-## 常被误判的三件事 / Three things most tools get wrong
+## Three things most tools get wrong / 常被误判的三件事
 
-- Spamhaus 返回 127.0.0.11 是 PBL（策略列表），表示"该 IP 段不应直连 MX"，不是垃圾邮件指控；
-  返回 127.255.255.x 表示查询被拒（用了公共 DNS），结果无效而非"已列入"。
-- 反向解析应当查实际发信 IP，不是域名的 A 记录。
-- 收件人域名没有 A 记录、DMARC、PTR 是正常的，收件只依赖 MX。
+- A Spamhaus answer of 127.0.0.11 is the PBL, a policy list meaning "this IP range should not
+  connect to MX hosts directly" - it is not a spam accusation. An answer of 127.255.255.x means the
+  query was refused (a public resolver was used), so the result is invalid rather than "listed".
+- Reverse DNS applies to the actual sending IP, not the domain's A record.
+- A recipient domain having no A record, DMARC or PTR is normal; receiving mail only needs MX.
 
-## 隐私 / Privacy
+## Privacy / 隐私
 
-账号密码仅存在于处理该次请求的内存中，不写入数据库、日志或文件，不转发给任何第三方，
-无账号体系、无 Cookie、无缓存。代码开源可自行验证与自建。
+Account credentials exist only in the memory serving that one request. They are not written to any
+database, log or file, and are not forwarded to any third party. There are no accounts, no cookies
+and no caching. The source is open, so this can be verified or self-hosted.
 
-## 许可 / Licence
+The page loads three font families from Google Fonts, which is the only third-party request the
+browser makes; it carries no credentials or diagnostic content.
+
+## Licence / 许可
 
 MIT
 `, SiteURL, RepoURL)

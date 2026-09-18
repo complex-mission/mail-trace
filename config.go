@@ -59,12 +59,12 @@ func initDNSServers() {
 		out = append(out, s)
 	}
 	if len(out) == 0 {
-		log.Printf("警告: MAIL_TRACE_DNS 未解析出任何解析器，回退到默认值")
+		log.Printf("warning: MAIL_TRACE_DNS yielded no resolvers, falling back to the default")
 		dnsServers, UsingDefaultDNS = defaultDNSServers, true
 		return
 	}
 	dnsServers = out
-	log.Printf("DNS 解析器: %s", strings.Join(dnsServers, "、"))
+	log.Printf("DNS resolvers: %s", strings.Join(dnsServers, ", "))
 }
 
 // initTrustedProxies 解析 MAIL_TRACE_TRUSTED_PROXIES（CIDR 或单个 IP，逗号分隔）。
@@ -87,7 +87,7 @@ func initTrustedProxies() {
 			trustedProxies = append(trustedProxies, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
 			continue
 		}
-		log.Printf("警告: MAIL_TRACE_TRUSTED_PROXIES 中的 %q 不是合法的 IP 或 CIDR，已忽略", part)
+		log.Printf("warning: %q in MAIL_TRACE_TRUSTED_PROXIES is not a valid IP or CIDR, ignoring", part)
 	}
 }
 
@@ -100,7 +100,7 @@ func initShutdownGrace() {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil || d < 0 {
-		log.Printf("警告: SHUTDOWN_GRACE=%q 不是合法时长，用默认 %s", v, defaultShutdownGrace.String())
+		log.Printf("warning: SHUTDOWN_GRACE=%q is not a valid duration, using the default %s", v, defaultShutdownGrace)
 		ShutdownGrace = defaultShutdownGrace
 		return
 	}

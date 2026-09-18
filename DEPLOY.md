@@ -158,17 +158,18 @@ after every configuration change — this is where a silently ignored `.env`
 shows up:
 
 ```
-Redis 限流已启用: 10 次 / 1m0s
-已配置 2 个可信代理网段，限流将采信 X-Forwarded-For
-Mail Trace v1.0.0 已启动，监听 http://127.0.0.1:9013
+loaded config file /www/wwwroot/mail-trace/.env
+rate limiting enabled via Redis: 10 requests / 1m0s
+2 trusted proxy range(s) configured; X-Forwarded-For will be honoured
+Mail Trace v1.0.0 listening on http://127.0.0.1:9013 (Ctrl+C to stop)
 ```
 
 If instead you see either of these, the corresponding setting did not take
 effect:
 
 ```
-未配置 REDIS_URL，限流已跳过
-未配置 MAIL_TRACE_TRUSTED_PROXIES，限流按 RemoteAddr 计数（...）
+REDIS_URL is not set, rate limiting is off
+MAIL_TRACE_TRUSTED_PROXIES is not set; rate limiting counts RemoteAddr (...)
 ```
 
 Then check the behaviour end to end:
@@ -196,13 +197,13 @@ done; echo
 # 429 for a second visitor, the trusted-proxy setting is wrong
 
 # 5. graceful shutdown actually runs (restart the service, then)
-#    look for: 收到退出信号，停止接受新请求，最多等待 ...
+#    look for: stop signal received; no longer accepting requests ...
 ```
 
 ## Operating notes
 
 - **Rate limiting fails open.** If Redis becomes unreachable the service
-  logs `限流查询失败，本次放行` and serves the request. `MAX_CONCURRENT`
+  logs `rate-limit lookup failed, allowing this request` and serves it. `MAX_CONCURRENT`
   is the backstop that still applies.
 - **DNSBL results are only as good as your resolver.** On a public
   resolver Spamhaus answers `127.255.255.x`, which the tool reports as
