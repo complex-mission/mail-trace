@@ -790,6 +790,18 @@
             width:22px; height:22px; padding:0; border:none; border-radius:6px; background:transparent;
             color:var(--text-2); cursor:pointer; margin:-2px -4px 0 8px; }
         .hint-pop .close:hover { background:var(--bg-3); color:var(--text-0); }
+        /* 提示里有 8 个表格和几处列表，此前完全没有样式，浏览器默认排版会让
+           列宽随内容乱跳、表头与数据对不齐。沿用知识库 .kb-a 的同一套约定。 */
+        .hint-pop table { width:100%; border-collapse:collapse; margin:8px 0 10px; font-size:11.5px; }
+        .hint-pop th, .hint-pop td { border:1px solid var(--border); padding:5px 8px;
+            text-align:left; vertical-align:top; line-height:1.5; }
+        .hint-pop th { background:var(--info-bg); color:var(--text-0); font-weight:500; white-space:nowrap; }
+        .hint-pop td:first-child { white-space:nowrap; color:var(--text-0); }
+        .hint-pop ul { margin:6px 0 8px 18px; padding:0; }
+        .hint-pop ol { margin:6px 0 8px 22px; padding:0; }
+        .hint-pop li { margin:3px 0; }
+        .hint-pop b { color:var(--text-0); font-weight:600; }
+        .hint-pop p:last-child { margin-bottom:0; }
 
         /* ── 角色标记 ── */
         .role-badge { display:inline-block; font-size:10px; padding:2px 8px; border-radius:20px;
@@ -818,6 +830,9 @@
         .kb-a a, .notice-box a { color:var(--accent); text-decoration:none; border-bottom:1px solid rgba(91,156,246,.35); }
         .kb-a a:hover, .notice-box a:hover { border-bottom-color:var(--accent); }
         .kb-a ul { margin:6px 0 6px 18px; }
+        /* 顶部的 * { padding:0 } 清掉了列表默认缩进，标记符会跑到内容盒外面。
+           ul 已用 margin-left 补偿，ol 此前遗漏，序号因此冒出卡片左边缘。 */
+        .kb-a ol { margin:6px 0 6px 22px; padding:0; }
         .kb-a table { width:100%; border-collapse:collapse; margin:8px 0; font-size:11.5px; }
         .kb-a th, .kb-a td { border:1px solid var(--border); padding:5px 8px; text-align:left; }
         .kb-a th { background:var(--info-bg); color:var(--text-0); font-weight:500; }
