@@ -41,3 +41,29 @@ jobs:
 
       - name: 竞态检测（仅纯函数，不依赖网络）
         run: go test -race -run 'TestExtractDMARCPolicy|TestReverseIP|TestCheckDNSBLRejectsBadIP' ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 镜像构建是唯一无法在本地验证的路径（基础镜像标签、.dockerignore
+      # 是否漏掉 go:embed 的输入），所以交给 CI 每次都真跑一遍。
+      - name: build image
+        run: docker build -t mail-trace:ci .
+
+      - name: 冒烟测试
+        run: |
+          docker run -d --name mt -p 9013:9013 mail-trace:ci
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:9013/ -o /dev/null; then ok=1; break; fi
+            sleep 1
+          done
+          docker logs mt
+          test -n "$ok" || { echo "容器未在 20 秒内就绪"; exit 1; }
+          curl -fsS http://127.0.0.1:9013/og.png -o /dev/null && echo "og.png OK"
+          curl -fsS -X POST http://127.0.0.1:9013/api/records \
+               -H 'Content-Type: application/json' \
+               -d '{"domain":"github.com","lang":"en"}' | head -c 200
+          echo
+          docker rm -f mt
