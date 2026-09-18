@@ -18,14 +18,22 @@
     <meta property="og:url" content="https://mail-trace.complexmission.com/">
     <meta property="og:title" content="Mail Trace — 邮件发送链路诊断">
     <meta property="og:description" content="真实跑一次 SMTP 会话，逐跳定位邮件发不出去或进垃圾箱的原因。完整 SPF 求值、发信 IP 的 PTR 检查、Spamhaus 返回码分类。开源，凭据不落盘。">
-    <meta property="og:image" content="https://mail-trace.complexmission.com/og.svg">
+    <meta property="og:image" content="https://mail-trace.complexmission.com/og.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="Mail Trace — 邮件发送全链路诊断">
     <meta property="og:locale" content="zh_CN">
     <meta property="og:locale:alternate" content="en_US">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Mail Trace — 邮件发送链路诊断">
     <meta name="twitter:description" content="逐跳诊断 SMTP 投递链路：SPF 完整求值、PTR/FCrDNS、DNSBL 返回码分类。开源自建。">
-    <meta name="twitter:image" content="https://mail-trace.complexmission.com/og.svg">
+    <meta name="twitter:image" content="https://mail-trace.complexmission.com/og.png">
+    <meta name="twitter:image:alt" content="Mail Trace — 邮件发送全链路诊断">
     <meta name="theme-color" content="#0f1420">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,100..900;1,100..900&family=Chiron+Hei+HK:ital,wght@0,200..900;1,200..900&family=Sometype+Mono:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
     <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -146,10 +154,23 @@
             --warn-border: rgba(240,184,104,0.25);
             --info: #5b9cf6;
             --info-bg: rgba(91,156,246,0.08);
+
+            /* Archivo 不含中文字形，所以中英文版都让它排第一即可：
+               浏览器按字形逐个回退，拉丁字符走 Archivo，中文自动落到 Chiron Hei HK。
+               靠切换语言去换字体栈反而会让中英混排的那一行前后不一致。 */
+            --font-sans: 'Archivo', 'Chiron Hei HK', -apple-system, BlinkMacSystemFont,
+                         'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+
+            /* 等宽栈必须带中文兜底：服务器应答、诊断建议、DNS 值里都混着中文，
+               而 Sometype Mono 同样没有中文字形。不兜底就会落到通用 monospace，
+               在 Windows 上是 Courier New —— 中文会被渲染成难看的宋体替代字形。 */
+            --font-mono: 'Sometype Mono', 'JetBrains Mono', 'SF Mono', 'Fira Code',
+                         'Cascadia Code', ui-monospace, Menlo, Consolas,
+                         'Chiron Hei HK', 'PingFang SC', 'Microsoft YaHei', monospace;
         }
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            font-family: var(--font-sans);
             background: var(--bg-0);
             color: var(--text-0);
             min-height: 100vh;
@@ -517,7 +538,7 @@
             border-radius: 7px;
             padding: 10px 13px;
             margin-top: 8px;
-            font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+            font-family: var(--font-mono);
             font-size: 0.78rem;
             color: var(--text-1);
             white-space: pre-wrap;
@@ -637,7 +658,7 @@
             border-radius: 7px;
             padding: 5px 10px;
             font-size: 0.78rem;
-            font-family: 'JetBrains Mono', 'SF Mono', monospace;
+            font-family: var(--font-mono);
             color: var(--text-1);
         }
         .ext-chip.known { border-color: rgba(91,156,246,0.3); color: var(--accent); }
@@ -979,7 +1000,7 @@
                 </div>
                 <div class="form-group">
                     <label data-i18n="lblPass">密码</label>
-                    <input type="password" id="password" autocomplete="off" data-ph="phPass" placeholder="应用专用密码或邮箱密码">
+                    <input type="password" id="password" autocomplete="new-password" data-ph="phPass" placeholder="应用专用密码或邮箱密码">
                 </div>
                 <div class="form-group">
                     <label data-i18n="lblFrom">发件人地址</label>
@@ -1160,8 +1181,8 @@
     }
 
     // ── i18n ───────────────────────────────────────────────────────────────
-    let LANG = localStorage.getItem('mt_lang') || (navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
-    LANG = localStorage.getItem('mt_lang') || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
+    // || 比 ?: 优先级高，所以括号不能省：漏掉会让存过的 mt_lang 被整体吞进条件判断里。
+    let LANG = localStorage.getItem('mt_lang') || ((navigator.language || '').toLowerCase().startsWith('zh') ? 'zh' : 'en');
 
     const I18N = {
       sub:        ['邮件发送全链路诊断 — 探测每个环节的问题', 'End-to-end mail delivery diagnostics - probe every hop'],
@@ -1228,6 +1249,16 @@
       senderDomain: ['发件人域名', 'Sender domain'],
       recvDomain:   ['收件人域名', 'Recipient domain'],
       notCfg:     ['未配置', 'not configured'],
+      certSubject:['域名', 'Subject'],
+      certIssuer: ['颁发者', 'Issuer'],
+      certValid:  ['有效期', 'Validity'],
+      certLeft:   ['剩余', 'Remaining'],
+      certProto:  ['协议', 'Protocol'],
+      certCipher: ['加密套件', 'Cipher'],
+      certSAN:    ['SAN', 'SAN'],
+      certExpired:['已过期', 'expired'],
+      certDays:   ['天', 'days'],
+      certNoSAN:  ['无', 'none'],
       notFound:   ['未找到', 'not found'],
       dkimNote:   ['未探测到 — DKIM 选择器无法枚举，可能由第三方服务代签或使用了自定义选择器',
                    'Not detected - DKIM selectors cannot be enumerated; it may be signed by a third party or use a custom selector'],
@@ -1474,6 +1505,7 @@
           <li><b>不转发</b>：凭据只用于向你自己填写的那台 SMTP 服务器发起认证，不发送给任何第三方。</li>
           <li><b>不留会话</b>：本工具没有账号体系、不设 Cookie、不做用户画像。</li>
           <li><b>单次使用</b>：每次诊断都需要重新填写，服务端不做任何形式的缓存或"记住密码"。</li>
+          <li><b>第三方资源</b>：页面的字体来自 Google Fonts（<code>fonts.googleapis.com</code> / <code>fonts.gstatic.com</code>），这会让 Google 看到你的 IP 与浏览器信息。字体请求不携带任何凭据、邮箱地址或诊断内容，Google Fonts 也不设置 Cookie。若你不接受这一点，自建时删掉页面 <code>&lt;head&gt;</code> 里的三行字体 link 即可，页面会回退到系统字体。</li>
         </ul>
         <p><b>你仍然应当注意的风险</b></p>
         <ul>
@@ -1500,6 +1532,7 @@
           <li><b>Never forwarded</b>: credentials are used solely to authenticate against the SMTP server you entered, and are sent nowhere else.</li>
           <li><b>No session</b>: there are no accounts, no cookies and no profiling.</li>
           <li><b>Single use</b>: every run requires re-entry. Nothing is cached and there is no "remember me".</li>
+          <li><b>Third-party assets</b>: fonts are served by Google Fonts (<code>fonts.googleapis.com</code> / <code>fonts.gstatic.com</code>), so Google sees your IP and browser details. Those requests carry no credentials, addresses or diagnostic content, and Google Fonts sets no cookies. If that is unacceptable, delete the three font <code>&lt;link&gt;</code> lines from the page head when self-hosting; it falls back to system fonts.</li>
         </ul>
         <p><b>Risks you should still weigh</b></p>
         <ul>
@@ -1728,17 +1761,17 @@
         const card = document.getElementById('tlsCard');
         card.classList.remove('hidden');
         const daysClass = cert.days_left < 30 ? 'cert-warn' : 'cert-ok';
-        const daysText = cert.days_left < 0 ? '已过期' : cert.days_left + ' 天';
-        const sans = (cert.sans || []).slice(0, 5).join(', ') || '无';
+        const daysText = cert.days_left < 0 ? t('certExpired') : cert.days_left + ' ' + t('certDays');
+        const sans = (cert.sans || []).slice(0, 5).join(', ') || t('certNoSAN');
         document.getElementById('tlsContent').innerHTML = `
             <div class="cert-grid">
-                <div class="cert-label">域名</div><div class="cert-value">${esc(cert.subject)}</div>
-                <div class="cert-label">颁发者</div><div class="cert-value">${esc(cert.issuer)}</div>
-                <div class="cert-label">有效期</div><div class="cert-value">${esc(cert.not_before)} ~ ${esc(cert.not_after)}</div>
-                <div class="cert-label">剩余</div><div class="cert-value ${daysClass}">${daysText}</div>
-                <div class="cert-label">协议</div><div class="cert-value">${esc(cert.protocol)}</div>
-                <div class="cert-label">加密套件</div><div class="cert-value">${esc(cert.cipher)}</div>
-                <div class="cert-label">SAN</div><div class="cert-value">${esc(sans)}</div>
+                <div class="cert-label">${t('certSubject')}</div><div class="cert-value">${esc(cert.subject)}</div>
+                <div class="cert-label">${t('certIssuer')}</div><div class="cert-value">${esc(cert.issuer)}</div>
+                <div class="cert-label">${t('certValid')}</div><div class="cert-value">${esc(cert.not_before)} ~ ${esc(cert.not_after)}</div>
+                <div class="cert-label">${t('certLeft')}</div><div class="cert-value ${daysClass}">${esc(daysText)}</div>
+                <div class="cert-label">${t('certProto')}</div><div class="cert-value">${esc(cert.protocol)}</div>
+                <div class="cert-label">${t('certCipher')}</div><div class="cert-value">${esc(cert.cipher)}</div>
+                <div class="cert-label">${t('certSAN')}</div><div class="cert-value">${esc(sans)}</div>
             </div>`;
     }
 
@@ -1797,7 +1830,8 @@
                 if (dk.length) {
                     for (const d of dk) {
                         html += dnsRow('DKIM (' + esc(d.selector) + ')' + hint('dkim'),
-                            d.record ? d.record.slice(0, 70) + '...' : t('notFound'), 'pass');
+                            d.record ? (d.record.length > 70 ? d.record.slice(0, 70) + '…' : d.record) : t('notFound'),
+                            d.found === false ? 'miss' : 'pass');
                     }
                 } else {
                     html += dnsRow('DKIM' + hint('dkim'), t('dkimNote'), 'na');

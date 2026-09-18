@@ -1,12 +1,33 @@
 package main
 
 import (
+	"crypto/sha256"
+	"embed"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 )
+
+// ogPNG 是预先用无头浏览器把 og.svg 渲染好的 1200x630 位图。
+//
+// 为什么不直接把 og.svg 当社交卡片图：Facebook 与 X/Twitter 都不接受 SVG，
+// 给了也只会退化成没有配图的纯文字卡片。而在服务端实时栅格化 SVG 需要额外引入
+// 渲染库，为一张从不变化的静态图片增加两个运行时依赖并不划算 —— 所以预渲染后入库。
+// 改动 ogSVG 的设计后，需要重新渲染并替换 docs/og.png（README 的贡献一节有命令）。
+//
+//go:embed docs/og.png
+var ogPNGFS embed.FS
+
+var ogPNG, ogPNGETag = func() ([]byte, string) {
+	b, err := ogPNGFS.ReadFile("docs/og.png")
+	if err != nil {
+		panic("embed docs/og.png: " + err.Error())
+	}
+	sum := sha256.Sum256(b)
+	return b, fmt.Sprintf("\"%x\"", sum[:8])
+}()
 
 // SiteURL 决定 canonical / sitemap / OG 里写什么域名，部署时用 SITE_URL 覆盖。
 var SiteURL = func() string {
@@ -104,11 +125,26 @@ MIT
 `, SiteURL, RepoURL)
 }
 
-// handleOGImage 输出社交分享卡片（SVG，1200x630）。
+// handleOGImage 输出社交分享卡片的矢量版（SVG，1200x630）。
+// 网页里 <meta og:image> 指向的是 PNG 版本，见 handleOGImagePNG。
 func handleOGImage(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	fmt.Fprint(w, ogSVG)
+}
+
+// handleOGImagePNG 输出社交分享卡片的位图版。各家抓取器只认这个。
+func handleOGImagePNG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("ETag", ogPNGETag)
+	if r.Header.Get("If-None-Match") == ogPNGETag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Write(ogPNG)
 }
 
 const ogSVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">

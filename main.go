@@ -1267,10 +1267,19 @@ func getTCPErrorTips(lang L, err error, host string, port int) []string {
 // 上下文转义必须完整解析内联 JS，遇到正则字面量这类「除号还是正则」的歧义会执行
 // 失败——而且失败时 header 已经发出，表现为 200 空响应，极难排查。静态页面直接
 // 发字节，既没有这个风险，也省掉每次请求的转义开销。
+//
+// 页面里的 canonical / hreflang / og:url / og:image 都写死了原站域名。自建部署若不替换，
+// 这些标签会把自己的站点全部指回原站 —— 对搜索引擎等于声明「我是副本」。
+// 这里仍然不引入 html/template（理由同上），只在启动时做一次字节替换。
+const canonicalPlaceholder = "https://mail-trace.complexmission.com"
+
 var indexHTML, indexETag = func() ([]byte, string) {
 	b, err := templateFS.ReadFile("templates/index.html")
 	if err != nil {
 		panic("embed templates/index.html: " + err.Error())
+	}
+	if SiteURL != canonicalPlaceholder {
+		b = bytes.ReplaceAll(b, []byte(canonicalPlaceholder), []byte(SiteURL))
 	}
 	sum := sha256.Sum256(b)
 	return b, fmt.Sprintf("\"%x\"", sum[:8])
@@ -1287,6 +1296,19 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+	// 页面的样式和脚本都是内联的，所以 'unsafe-inline' 去不掉。真正的收益在别处：
+	// default-src 'self' 挡掉任何外部脚本，form-action 'none' 保证即便页面被注入
+	// 一个表单也无法把密码 POST 到站外，frame-ancestors 'none' 挡点击劫持。
+	//
+	// 字体来自 Google Fonts，所以 style-src 要放行 fonts.googleapis.com（那是一张 CSS）、
+	// font-src 要放行 fonts.gstatic.com（真正的字体文件）。只放行这两个具体域名，
+	// script-src 依然不含任何外部源 —— 字体 CDN 拿不到执行脚本的权限。
+	w.Header().Set("Content-Security-Policy",
+		"default-src 'self'; script-src 'self' 'unsafe-inline'; "+
+			"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+			"img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; "+
+			"base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+	w.Header().Set("X-Frame-Options", "DENY")
 	if match := r.Header.Get("If-None-Match"); match == indexETag {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -1889,6 +1911,7 @@ func main() {
 	mux.HandleFunc("/sitemap.xml", withLogging(handleSitemap))
 	mux.HandleFunc("/llms.txt", withLogging(handleLLMs))
 	mux.HandleFunc("/og.svg", withLogging(handleOGImage))
+	mux.HandleFunc("/og.png", withLogging(handleOGImagePNG))
 
 	srv := newServer(listen, mux)
 
