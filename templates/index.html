@@ -182,6 +182,28 @@
             padding: 46px 22px 88px;
         }
 
+        /* ── Footer ── */
+        .site-foot {
+            margin-top: 34px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 6px 14px;
+            font-size: 0.8rem;
+            color: var(--text-2);
+        }
+        .site-foot a {
+            color: var(--text-1);
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: color .15s, border-color .15s;
+        }
+        .site-foot a:hover { color: var(--accent); border-bottom-color: var(--accent); }
+        .site-foot .sep { opacity: .45; }
+
         /* ── Header ── */
         .header {
             position: relative;
@@ -1100,6 +1122,14 @@
             </div>
             <div id="legalContent"></div>
         </div>
+
+        <footer class="site-foot">
+            <span>Powered by <a href="https://complexmission.com" target="_blank" rel="noopener">Complex Mission</a></span>
+            <span class="sep">·</span>
+            <a href="https://github.com/complex-mission/mail-trace" target="_blank" rel="noopener">GitHub</a>
+            <span class="sep">·</span>
+            <span data-i18n="footLicense">MIT 开源协议</span>
+        </footer>
     </div>
 
     <noscript>
@@ -1211,6 +1241,7 @@
       cardDns:    ['DNS 记录检查', 'DNS Records'],
       cardKb:     ['邮件送达知识库', 'Deliverability Knowledge Base'],
       cardLegal:  ['隐私承诺与免责声明', 'Privacy Commitment & Disclaimer'],
+      footLicense:['MIT 开源协议', 'MIT licensed'],
       modeRecords:['仅查记录', 'Records check'],
       modeFull:   ['完整链路诊断', 'Full delivery test'],
       hintRecords:['只查 DNS：SPF / DKIM / DMARC / MX / PTR / 黑名单，并核对 Gmail、Microsoft 等收件方的准入要求。不需要邮箱密码，适合刚改完解析想确认是否生效。',
