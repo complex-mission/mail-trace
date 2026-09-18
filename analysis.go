@@ -30,6 +30,53 @@ func lookupTXT(ctx context.Context, name string) []string {
 	return out
 }
 
+// lookupTXTUnion 并发问遍所有配置的解析器，把 TXT 结果取并集。
+//
+// 「这个域名没有这条记录」是个代价极高的结论：SPF 缺失会让四家收件方全判不合格，
+// 用户会被指着去添加一条其实早就配好的记录。而公共解析器对大 TXT RRset 并不可靠——
+// 实测 223.5.5.5 对同一个域名每次返回 16~18 条不等的子集，SPF 就常在被丢掉的那几条里，
+// 换 1.1.1.1 / 8.8.8.8 则稳定返回全部 24 条。单台解析器的沉默不足以证明记录不存在，
+// 所以凡是「查不到就下负面结论」的记录，都要问过所有解析器再说。
+func lookupTXTUnion(ctx context.Context, name string) []string {
+	if len(dnsServers) <= 1 {
+		return lookupTXT(ctx, name)
+	}
+	per := make([][]string, len(dnsServers))
+	var wg sync.WaitGroup
+	for i, server := range dnsServers {
+		wg.Add(1)
+		go func(idx int, srv string) {
+			defer wg.Done()
+			m := new(dns.Msg)
+			m.SetQuestion(dns.Fqdn(name), dns.TypeTXT)
+			resp, err := exchangeOnce(ctx, m, srv)
+			if err != nil || resp == nil {
+				return
+			}
+			var got []string
+			for _, ans := range resp.Answer {
+				if txt, ok := ans.(*dns.TXT); ok {
+					got = append(got, strings.Join(txt.Txt, ""))
+				}
+			}
+			per[idx] = got
+		}(i, server)
+	}
+	wg.Wait()
+
+	seen := make(map[string]bool)
+	var union []string
+	for _, got := range per {
+		for _, t := range got {
+			if !seen[t] {
+				seen[t] = true
+				union = append(union, t)
+			}
+		}
+	}
+	return union
+}
+
 func lookupIPs(ctx context.Context, name string) []net.IP {
 	var ips []net.IP
 	m := new(dns.Msg)
@@ -143,7 +190,7 @@ type SPFEval struct {
 const spfMaxLookups = 10
 
 func spfRecordOf(ctx context.Context, domain string) string {
-	for _, t := range lookupTXT(ctx, domain) {
+	for _, t := range lookupTXTUnion(ctx, domain) {
 		s := strings.TrimSpace(t)
 		if strings.HasPrefix(strings.ToLower(s), "v=spf1") {
 			return s

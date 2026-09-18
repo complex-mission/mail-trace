@@ -339,20 +339,117 @@ func parseEHLOExtensions(msg string) []SMTPExtension {
 
 // ── DNS Resolution ─────────────────────────────────────────────────────────────
 
-var dnsServers = []string{"223.5.5.5:53", "119.29.29.29:53"}
+// defaultDNSServers 的顺序是有讲究的：
+//
+// 223.5.5.5 放第一位，因为普通查询（lookupTXT / A / MX / DKIM 探测）是「谁先答就用谁」，
+// 国内访问它只要几十毫秒，把一个可能被墙的地址放前面会让每次查询都先白等 2 秒超时。
+//
+// 但它对大 TXT RRset 会静默丢记录。实测同一个 github.com 连查三次，
+// 223.5.5.5 返回 14~18 条不等且从不含 SPF，1.1.1.1 / 8.8.8.8 / 9.9.9.9 则稳定返回全部 24 条
+// （114DNS 只返回 6 条，DNSPod 不可达，百度 3 条）——国内几家公共 DNS 无一例外。
+// 所以名单里必须有一个完整的解析器：lookupTXTUnion 会并发问遍所有解析器再取并集，
+// SPF / DMARC 这类「查不到就下负面结论」的记录因此不会被单台解析器的残缺应答误判。
+// 并发查询，所以第二台不拖慢；真被墙了也只是退回残缺结果，不会失败。
+//
+// 内网部署或想要可信的 DNSBL 结果时，用 MAIL_TRACE_DNS 覆盖为自建递归解析器。
+var defaultDNSServers = []string{"223.5.5.5:53", "1.1.1.1:53"}
+
+// dnsServers 默认指向国内公共 DNS，用 MAIL_TRACE_DNS 覆盖（逗号分隔，可省略 :53）。
+// 这不只是延迟问题：Spamhaus 这类列表会拒绝来自公共解析器的查询并返回 127.255.255.x，
+// 所以默认配置下 DNSBL 那一项本身就是不可信的 —— 想要准确结论必须指向自建递归解析器。
+var dnsServers = func() []string {
+	raw := os.Getenv("MAIL_TRACE_DNS")
+	if raw == "" {
+		return defaultDNSServers
+	}
+	var out []string
+	for _, s := range strings.Split(raw, ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(s); err != nil {
+			s = net.JoinHostPort(s, "53")
+		}
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return defaultDNSServers
+	}
+	return out
+}()
+
+// UsingDefaultDNS 为真时，DNSBL 的「查询被拒」提示才需要提醒用户换解析器。
+var UsingDefaultDNS = os.Getenv("MAIL_TRACE_DNS") == ""
+
+// dnsResolverHint 告诉用户「查询被拒」这件事是不是本服务自己的配置造成的。
+func dnsResolverHint(lang L) string {
+	if UsingDefaultDNS {
+		return lang.T("本服务当前用的就是公共 DNS，所以这一项必然不准；部署方用 MAIL_TRACE_DNS 指向自建递归解析器即可消除",
+			"This service is currently using public resolvers, so this check cannot be accurate. The operator can point MAIL_TRACE_DNS at a private recursive resolver to fix it.")
+	}
+	return lang.T("本服务已配置专用解析器；仍被拒通常意味着超出了该列表的免费查询额度",
+		"This service already uses a dedicated resolver; a refusal usually means the list's free query quota was exceeded.")
+}
+
+// dnsUDPBufSize 是 EDNS0 声明的接收缓冲区。不声明的话 UDP 应答上限是 512 字节，
+// 而一个正常企业域名的 TXT 集合（SPF 加上各家 SaaS 的站点验证串）轻松就超过——
+// 应答被截断后 SPF 会凭空消失，工具于是让用户去添加一条他早就配好的记录，
+// 并把所有收件方判成不可达。这是整个诊断里最容易骗人的一种失败。
+const dnsUDPBufSize = 4096
+
+// exchangeOnce 发一次查询，必要时按 RFC 1035 退回 TCP 重试。
+func exchangeOnce(ctx context.Context, msg *dns.Msg, server string) (*dns.Msg, error) {
+	c := &dns.Client{Timeout: 2 * time.Second, UDPSize: dnsUDPBufSize}
+
+	q := msg.Copy()
+	q.SetEdns0(dnsUDPBufSize, false)
+	resp, _, err := c.ExchangeContext(ctx, q, server)
+
+	// 老旧或严格的解析器可能不认 EDNS0，回 FORMERR/NOTIMP。退回不带 OPT 的查询再试一次。
+	if err == nil && resp != nil && (resp.Rcode == dns.RcodeFormatError || resp.Rcode == dns.RcodeNotImplemented) {
+		resp, _, err = c.ExchangeContext(ctx, msg, server)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return nil, fmt.Errorf("%s: empty response", server)
+	}
+
+	// 仍然装不下就走 TCP。截断的应答里 Answer 是不完整的，直接用等于读到假数据。
+	if resp.Truncated {
+		tcp := &dns.Client{Net: "tcp", Timeout: 5 * time.Second}
+		if r2, _, err2 := tcp.ExchangeContext(ctx, q, server); err2 == nil && r2 != nil && !r2.Truncated {
+			return r2, nil
+		}
+	}
+	return resp, nil
+}
 
 func dnsQueryContext(ctx context.Context, msg *dns.Msg) (*dns.Msg, error) {
-	c := &dns.Client{Timeout: 2 * time.Second}
+	lastErr := error(nil)
 	for _, server := range dnsServers {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		resp, _, err := c.ExchangeContext(ctx, msg, server)
-		if err == nil && resp != nil {
+		resp, err := exchangeOnce(ctx, msg, server)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		// NOERROR 和 NXDOMAIN 都是权威答复，可以直接用。
+		// SERVFAIL / REFUSED 只是「这台解析器答不了」—— 当成成功会让我们
+		// 永远不去问第二台，一台抽风就等于整个查询失败。
+		if resp.Rcode == dns.RcodeSuccess || resp.Rcode == dns.RcodeNameError {
 			return resp, nil
 		}
+		lastErr = fmt.Errorf("%s: %s", server, dns.RcodeToString[resp.Rcode])
+	}
+	if lastErr != nil {
+		return nil, fmt.Errorf("all DNS servers failed: %w", lastErr)
 	}
 	return nil, fmt.Errorf("all DNS servers failed")
 }
@@ -431,21 +528,17 @@ func resolveDNSContext(ctx context.Context, domain string) *DNSResult {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		m := new(dns.Msg)
-		m.SetQuestion(dns.Fqdn(domain), dns.TypeTXT)
-		if resp, err := dnsQueryContext(ctx, m); err == nil {
-			mu.Lock()
-			for _, ans := range resp.Answer {
-				if txt, ok := ans.(*dns.TXT); ok {
-					full := strings.Join(txt.Txt, "")
-					if strings.Contains(strings.ToLower(full), "v=spf") {
-						r.SPF = full
-						valid := validateSPF(full)
-						r.SPFValid = &valid
-					}
-				}
+		// 走并集查询：单台公共解析器会丢掉大 TXT RRset 里的记录，
+		// 据此报「没有 SPF」会把一个配置正确的域名判成全线不合格。
+		for _, full := range lookupTXTUnion(ctx, domain) {
+			if strings.Contains(strings.ToLower(full), "v=spf") {
+				mu.Lock()
+				r.SPF = full
+				valid := validateSPF(full)
+				r.SPFValid = &valid
+				mu.Unlock()
+				break
 			}
-			mu.Unlock()
 		}
 	}()
 
@@ -475,26 +568,52 @@ func resolveDNSContext(ctx context.Context, domain string) *DNSResult {
 			// 常见自动化命名
 			"cm", "email", "mta", "dkim1", "dkim2",
 		}
-		var records []DKIMRecord
-		for _, sel := range selectors {
+		// 串行跑这张表要几十次往返，是整个诊断里最慢的一段。
+		// 限并发而不是全量放开：几十个查询一次性打向同一台公共解析器
+		// 很容易触发它的限速，反而更慢、还会丢应答。
+		const dkimWorkers = 8
+		found := make([]*DKIMRecord, len(selectors))
+		sem := make(chan struct{}, dkimWorkers)
+		var swg sync.WaitGroup
+	dispatch:
+		for i, sel := range selectors {
 			select {
 			case <-ctx.Done():
-				break
+				break dispatch
 			default:
 			}
-			m := new(dns.Msg)
-			m.SetQuestion(dns.Fqdn(sel+"._domainkey."+domain), dns.TypeTXT)
-			rec := DKIMRecord{Selector: sel}
-			if resp, err := dnsQueryContext(ctx, m); err == nil && len(resp.Answer) > 0 {
-				rec.Found = true
+			swg.Add(1)
+			go func(idx int, sel string) {
+				defer swg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
+				m := new(dns.Msg)
+				m.SetQuestion(dns.Fqdn(sel+"._domainkey."+domain), dns.TypeTXT)
+				resp, err := dnsQueryContext(ctx, m)
+				if err != nil || len(resp.Answer) == 0 {
+					return
+				}
+				rec := &DKIMRecord{Selector: sel, Found: true}
 				for _, ans := range resp.Answer {
 					if txt, ok := ans.(*dns.TXT); ok {
 						rec.Record = strings.Join(txt.Txt, "")
 					}
 				}
-			}
-			if rec.Found {
-				records = append(records, rec)
+				found[idx] = rec
+			}(i, sel)
+		}
+		swg.Wait()
+
+		// 按 selectors 的原始顺序收集，保证输出稳定、便于比对两次运行的结果
+		var records []DKIMRecord
+		for _, rec := range found {
+			if rec != nil {
+				records = append(records, *rec)
 			}
 		}
 		mu.Lock()
@@ -506,17 +625,15 @@ func resolveDNSContext(ctx context.Context, domain string) *DNSResult {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		m := new(dns.Msg)
-		m.SetQuestion(dns.Fqdn("_dmarc."+domain), dns.TypeTXT)
-		if resp, err := dnsQueryContext(ctx, m); err == nil {
-			mu.Lock()
-			for _, ans := range resp.Answer {
-				if txt, ok := ans.(*dns.TXT); ok {
-					r.DMARC = strings.Join(txt.Txt, "")
-					r.DMARCPol = extractDMARCPolicy(r.DMARC)
-				}
+		for _, full := range lookupTXTUnion(ctx, "_dmarc."+domain) {
+			if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(full)), "v=dmarc1") {
+				continue // _dmarc 下偶尔挂着别的 TXT，别把它们当成策略记录
 			}
+			mu.Lock()
+			r.DMARC = full
+			r.DMARCPol = extractDMARCPolicy(full)
 			mu.Unlock()
+			break
 		}
 	}()
 
@@ -1326,6 +1443,7 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 					Response: resp,
 					Tips: []string{
 						"Spamhaus 等列表会拒绝来自公共 DNS（223.5.5.5 / 8.8.8.8 等）的查询，返回 127.255.255.x",
+						dnsResolverHint(lang),
 						lang.T("这不代表 IP 被列入。要拿到准确结果需在服务器上跑自己的递归 DNS，或申请 Spamhaus 数据源", "That does not mean the IP is listed. For a trustworthy answer, run your own recursive resolver on the server or apply for a Spamhaus data feed."),
 					}})
 			default:
