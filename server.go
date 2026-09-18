@@ -168,6 +168,25 @@ func withLogging(next http.HandlerFunc) http.HandlerFunc {
 
 // ── 服务器 ─────────────────────────────────────────────────────────────────────
 
+// ShutdownGrace 是收到退出信号后留给进行中诊断的收尾时间。
+//
+// 默认 90 秒是按最坏情况取的：DATA 阶段会把超时放宽到 120 秒等服务端反垃圾扫描。
+// 但进程管理器往往等不了那么久 —— supervisor 的 stopwaitsecs 默认 10 秒，
+// 超时就 SIGKILL，优雅退出等于没有。所以放开成可配置，
+// 让它能和所在平台的停止超时对齐（设 0 表示不等待，立即关闭）。
+var ShutdownGrace = func() time.Duration {
+	v := os.Getenv("SHUTDOWN_GRACE")
+	if v == "" {
+		return 90 * time.Second
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < 0 {
+		log.Printf("警告: SHUTDOWN_GRACE=%q 不是合法时长，用默认 90s", v)
+		return 90 * time.Second
+	}
+	return d
+}()
+
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {

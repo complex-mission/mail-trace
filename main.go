@@ -1919,7 +1919,7 @@ func main() {
 	defer stopSignals()
 	done := make(chan struct{})
 	go func() {
-		shutdownOnSignal(sigCtx, srv, 90*time.Second)
+		shutdownOnSignal(sigCtx, srv, ShutdownGrace)
 		close(done)
 	}()
 

@@ -149,6 +149,8 @@ cp .env.example .env    # adjust as needed
 ./mail-trace            # listens on 127.0.0.1:9013 by default
 ```
 
+See [DEPLOY.md](DEPLOY.md) for a pre-launch checklist, reverse-proxy requirements, panel-managed setups and verification commands.
+
 Pass the listen address directly with `./mail-trace -listen 0.0.0.0:9013` (the old positional form `./mail-trace 0.0.0.0:9013` still works). `./mail-trace -version` prints the version.
 
 On `SIGINT` / `SIGTERM` it stops accepting new connections and gives in-flight diagnostics up to 90 seconds to finish — cutting an SMTP session mid-transaction leaves a half-finished transaction on the far side.
@@ -172,6 +174,7 @@ docker run --rm -p 9013:9013 --env-file .env mail-trace
 | `MAIL_TRACE_TRUSTED_PROXIES` | empty | Reverse-proxy ranges (CIDR or IP, comma separated). **Required behind nginx**, otherwise rate limiting counts the proxy IP and every visitor shares one bucket |
 | `MAX_CONCURRENT` | `32` | Cap on concurrent diagnostics; excess requests get 503. `0` disables the cap |
 | `MAIL_TRACE_DNS` | empty | DNS resolvers (comma separated, `:53` optional). Empty uses the built-in default `223.5.5.5 + 1.1.1.1` |
+| `SHUTDOWN_GRACE` | `90s` | How long in-flight diagnostics may finish after a stop signal. Match your process manager's timeout — supervisor kills at 10s by default |
 | `MAIL_TRACE_ALLOW_PRIVATE` | off | Allows internal targets and any port. **Internal deployments only** |
 
 #### About `MAIL_TRACE_DNS`

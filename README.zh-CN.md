@@ -149,6 +149,8 @@ cp .env.example .env    # 按需修改
 ./mail-trace            # 默认监听 127.0.0.1:9013
 ```
 
+上线前的检查清单、反向代理要求、面板托管部署与验证命令见 [DEPLOY.zh-CN.md](DEPLOY.zh-CN.md)。
+
 也可以直接传监听地址：`./mail-trace -listen 0.0.0.0:9013`（旧的位置参数写法 `./mail-trace 0.0.0.0:9013` 仍然可用）。`./mail-trace -version` 打印版本。
 
 收到 `SIGINT` / `SIGTERM` 后会停止接受新连接，并给进行中的诊断最多 90 秒收尾——SMTP 会话被拦腰砍断会在对端留下半截事务。
@@ -172,6 +174,7 @@ docker run --rm -p 9013:9013 --env-file .env mail-trace
 | `MAIL_TRACE_TRUSTED_PROXIES` | 空 | 反向代理网段（CIDR 或 IP，逗号分隔）。**在 nginx 后面必须配**，否则限流按代理 IP 计数，所有用户共用一个桶 |
 | `MAX_CONCURRENT` | `32` | 同时进行的诊断数上限，超出返回 503。`0` 为不限制 |
 | `MAIL_TRACE_DNS` | 空 | DNS 解析器（逗号分隔，可省略 `:53`）。留空用内置默认 `223.5.5.5 + 1.1.1.1` |
+| `SHUTDOWN_GRACE` | `90s` | 收到退出信号后留给进行中诊断的收尾时间。需与进程管理器的停止超时对齐——supervisor 默认 10 秒就强杀 |
 | `MAIL_TRACE_ALLOW_PRIVATE` | 关闭 | 允许内网目标与任意端口，**仅限内网部署** |
 
 #### 关于 `MAIL_TRACE_DNS`
