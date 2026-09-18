@@ -741,7 +741,8 @@ func testSMTPStream(ctx context.Context, cfg Config, rawEmit StepWriter) *TestRe
 	}
 
 	port := cfg.Port
-	useSSL := (port == 465)
+	// 465 与 994 连上即 TLS；按明文读 banner 会读到握手字节
+	useSSL := IsImplicitTLSPort(port)
 	host := cfg.Host
 
 	// ── Step 1: DNS resolution of SMTP host ──
@@ -852,7 +853,7 @@ func testSMTPStream(ctx context.Context, cfg Config, rawEmit StepWriter) *TestRe
 	// tlsActive 决定后面敢不敢发认证：AUTH LOGIN/PLAIN 只是 base64，不是加密。
 	var tlsState *tls.ConnectionState
 	tlsActive := false
-	if port != 465 && hasStartTLS {
+	if !useSSL && hasStartTLS {
 		tlsStart := time.Now()
 		tlsCode, tlsMsg, _ := conn.SendCommand("STARTTLS")
 		if tlsCode == 220 {
@@ -903,7 +904,7 @@ func testSMTPStream(ctx context.Context, cfg Config, rawEmit StepWriter) *TestRe
 				Tips:     getErrorTips(lang, tlsCode, tlsMsg),
 			})
 		}
-	} else if port == 465 {
+	} else if useSSL {
 		// SSL already active, get cert info
 		tlsActive = true
 		if tlsConn, ok := conn.conn.(*tls.Conn); ok {
@@ -922,7 +923,7 @@ func testSMTPStream(ctx context.Context, cfg Config, rawEmit StepWriter) *TestRe
 			}(),
 			Timing: 0,
 		})
-	} else if port != 465 && !hasStartTLS {
+	} else if !useSSL && !hasStartTLS {
 		emit(Step{
 			Name:   "STARTTLS",
 			Status: "warn",

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -52,14 +54,51 @@ func ValidateHost(s string) error {
 
 // 只放行真实存在的邮件提交端口。不加限制的话，本服务就是一个
 // 「输入任意 host:port，回显对方 banner」的对外端口扫描器。
-var allowedPorts = map[int]bool{25: true, 465: true, 587: true, 2525: true}
+// defaultAllowedPorts 覆盖各家实际在用的提交端口。994 不是笔误：
+// 163/126 官方文档给的 SSL 端口就是 465/994，少了它网易系用户根本测不了。
+// 由 initConfig 装配到 allowedPorts，可用 MAIL_TRACE_ALLOWED_PORTS 覆盖。
+var defaultAllowedPorts = []int{25, 465, 587, 994, 2525}
+
+// 这里给的是不读环境变量的安全默认值，initConfig 再按 MAIL_TRACE_ALLOWED_PORTS 覆盖。
+// 不留默认的话，任何没走 initConfig 的路径（测试、库式调用）都会因为 map 为 nil
+// 而拒绝掉全部端口 —— 失败方向是"全拒"，比"全放"安全，但会让人摸不着头脑。
+var allowedPorts = defaultPortSet()
+
+func defaultPortSet() map[int]bool {
+	m := make(map[int]bool, len(defaultAllowedPorts))
+	for _, p := range defaultAllowedPorts {
+		m[p] = true
+	}
+	return m
+}
+
+// implicitTLSPorts 上连上就是 TLS，不能先按明文读 banner——读到的会是握手字节。
+// 994 与 465 同属这一类（已对 smtp.163.com / smtp.126.com 实测确认）。
+var implicitTLSPorts = map[int]bool{465: true, 994: true}
+
+// IsImplicitTLSPort 判断该端口是否一连上就进行 TLS 握手。
+func IsImplicitTLSPort(p int) bool { return implicitTLSPorts[p] }
+
+func allowedPortList() string {
+	ns := make([]int, 0, len(allowedPorts))
+	for p := range allowedPorts {
+		ns = append(ns, p)
+	}
+	slices.Sort(ns)
+	ps := make([]string, len(ns))
+	for i, n := range ns {
+		ps[i] = strconv.Itoa(n)
+	}
+	return strings.Join(ps, "/")
+}
 
 func ValidatePort(p int) error {
 	if AllowPrivateTargets && p > 0 && p < 65536 {
 		return nil
 	}
 	if !allowedPorts[p] {
-		return fmt.Errorf("端口 %d 不被允许，仅支持 25/465/587/2525 / port %d not allowed", p, p)
+		return fmt.Errorf("端口 %d 不被允许，仅支持 %s / port %d not allowed; permitted: %s",
+			p, allowedPortList(), p, allowedPortList())
 	}
 	return nil
 }

@@ -27,6 +27,9 @@ func TestSecurity(t *testing.T) {
 		{"CGNAT 100.64", base(func(c *Config) { c.Host = "100.64.0.1" }), true},
 		{"IPv6 回环", base(func(c *Config) { c.Host = "::1" }), true},
 		{"域名指向 localhost", base(func(c *Config) { c.Host = "localhost" }), true},
+		// 994 是 163/126 官方给的 SSL 端口，曾因不在白名单里让网易系用户完全测不了
+		{"网易 SSL 端口 994", base(func(c *Config) { c.Port = 994 }), false},
+		{"备用提交端口 2525", base(func(c *Config) { c.Port = 2525 }), false},
 		{"端口扫描 :22", base(func(c *Config) { c.Port = 22 }), true},
 		{"端口扫描 :3306", base(func(c *Config) { c.Port = 3306 }), true},
 		{"端口扫描 :6379", base(func(c *Config) { c.Port = 6379 }), true},

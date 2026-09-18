@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -33,10 +34,44 @@ func initConfig() {
 	// 内网目标与端口白名单的总开关
 	AllowPrivateTargets = os.Getenv("MAIL_TRACE_ALLOW_PRIVATE") == "1"
 
+	initAllowedPorts()
 	initDNSServers()
 	initTrustedProxies()
 	initShutdownGrace()
 	initIndexHTML()
+}
+
+// initAllowedPorts 解析 MAIL_TRACE_ALLOWED_PORTS（逗号分隔），留空则用内置默认。
+//
+// 端口白名单的存在理由是防滥用：不加限制的话，本服务就是一个「输入任意 host:port、
+// 回显对方 banner」的对外扫描器。但默认那几个端口盖不住真实世界——163/126 的
+// SSL 端口官方就是 465/994，企业自建也常用非标端口。所以放开成可配置，
+// 让自建者按自己的场景决定，公网默认仍然收着。
+func initAllowedPorts() {
+	raw := strings.TrimSpace(os.Getenv("MAIL_TRACE_ALLOWED_PORTS"))
+	if raw == "" {
+		allowedPorts = defaultPortSet()
+		return
+	}
+	allowedPorts = make(map[int]bool)
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil || n < 1 || n > 65535 {
+			log.Printf("warning: %q in MAIL_TRACE_ALLOWED_PORTS is not a valid port, ignoring", part)
+			continue
+		}
+		allowedPorts[n] = true
+	}
+	if len(allowedPorts) == 0 {
+		log.Printf("warning: MAIL_TRACE_ALLOWED_PORTS yielded no ports, falling back to the default")
+		allowedPorts = defaultPortSet()
+		return
+	}
+	log.Printf("allowed SMTP ports: %s", allowedPortList())
 }
 
 // initDNSServers 解析 MAIL_TRACE_DNS，留空则用内置默认。

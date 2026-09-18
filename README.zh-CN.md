@@ -173,6 +173,7 @@ docker run --rm -p 9013:9013 --env-file .env mail-trace
 | `RATE_LIMIT_WINDOW` | `1m` | 限流窗口 |
 | `MAIL_TRACE_TRUSTED_PROXIES` | 空 | 反向代理网段（CIDR 或 IP，逗号分隔）。**在 nginx 后面必须配**，否则限流按代理 IP 计数，所有用户共用一个桶 |
 | `MAX_CONCURRENT` | `32` | 同时进行的诊断数上限，超出返回 503。`0` 为不限制 |
+| `MAIL_TRACE_ALLOWED_PORTS` | `25,465,587,994,2525` | 允许连接的端口。白名单的作用是防止本服务被当成端口扫描器；非标端口的邮件服务器可在此放开 |
 | `MAIL_TRACE_DNS` | 空 | DNS 解析器（逗号分隔，可省略 `:53`）。留空用内置默认 `223.5.5.5 + 1.1.1.1` |
 | `SHUTDOWN_GRACE` | `90s` | 收到退出信号后留给进行中诊断的收尾时间。需与进程管理器的停止超时对齐——supervisor 默认 10 秒就强杀 |
 | `MAIL_TRACE_ALLOW_PRIVATE` | 关闭 | 允许内网目标与任意端口，**仅限内网部署** |

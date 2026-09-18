@@ -1025,11 +1025,15 @@
                 </div>
                 <div class="form-group">
                     <label><span data-i18n="lblPort">Port</span><button type="button" class="hint-btn" aria-label="?" onclick="showHint(event,'ports')"><svg class="ico" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></button></label>
-                    <select id="port">
-                        <option value="587" data-i18n="opt587">587 — STARTTLS（推荐）</option>
-                        <option value="465" data-i18n="opt465">465 — SSL/TLS</option>
-                        <option value="25" data-i18n="opt25">25 — 明文（不推荐）</option>
-                    </select>
+                    <input type="number" id="port" list="portOptions" value="587" min="1" max="65535"
+                           inputmode="numeric" data-ph="phPort" placeholder="587">
+                    <datalist id="portOptions">
+                        <option value="587" data-i18n="opt587">587 - STARTTLS (recommended)</option>
+                        <option value="465" data-i18n="opt465">465 - Implicit SSL/TLS</option>
+                        <option value="994" data-i18n="opt994">994 - Implicit SSL/TLS (NetEase 163/126)</option>
+                        <option value="2525" data-i18n="opt2525">2525 - Alternate submission</option>
+                        <option value="25" data-i18n="opt25">25 - Cleartext (not recommended)</option>
+                    </datalist>
                 </div>
                 <div class="form-group">
                     <label data-i18n="lblUser">Username</label>
@@ -1243,6 +1247,9 @@
       opt587:     ['587 — STARTTLS（推荐）', '587 - STARTTLS (recommended)'],
       opt465:     ['465 — SSL/TLS', '465 - Implicit SSL/TLS'],
       opt25:      ['25 — 明文（不推荐）', '25 - Cleartext (not recommended)'],
+      opt994:     ['994 — SSL/TLS（网易 163/126）', '994 - Implicit SSL/TLS (NetEase 163/126)'],
+      opt2525:    ['2525 — 备用提交端口', '2525 - Alternate submission'],
+      phPort:     ['587', '587'],
       phPass:     ['应用专用密码或邮箱密码', 'App password or mailbox password'],
       tgDry:      ['仅检测，不发送邮件', 'Diagnose only, do not send'],
       tgDryHint:  ['勾选后在 DATA 步骤前停止，测试完整链路但不实际投递', 'Stops before DATA: tests the full path without delivering anything'],
@@ -1719,6 +1726,19 @@
         if (p.username) document.getElementById('username').value = p.username;
         if (p.from) document.getElementById('from').value = p.from;
     }
+
+    // 粘贴邮箱地址、域名或密码时最容易带进首尾空白，而它们会一路传到
+    // SMTP 命令里变成「地址不合法」这类莫名其妙的报错。失焦时就地清掉，
+    // 让用户看见自己实际会提交的值，而不是等服务端拒绝。
+    // 用事件委托绑在 document 上：后续新增的输入框自动生效，不必逐个挂。
+    document.addEventListener('blur', (e) => {
+        const el = e.target;
+        if (!el || el.tagName !== 'INPUT') return;
+        if (el.type === 'checkbox' || el.type === 'radio') return;
+        const v = el.value;
+        const t = v.trim();
+        if (t !== v) el.value = t;
+    }, true);
 
     function esc(s) {
         const d = document.createElement('div');

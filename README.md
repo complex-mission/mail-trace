@@ -173,6 +173,7 @@ docker run --rm -p 9013:9013 --env-file .env mail-trace
 | `RATE_LIMIT_WINDOW` | `1m` | Rate-limit window |
 | `MAIL_TRACE_TRUSTED_PROXIES` | empty | Reverse-proxy ranges (CIDR or IP, comma separated). **Required behind nginx**, otherwise rate limiting counts the proxy IP and every visitor shares one bucket |
 | `MAX_CONCURRENT` | `32` | Cap on concurrent diagnostics; excess requests get 503. `0` disables the cap |
+| `MAIL_TRACE_ALLOWED_PORTS` | `25,465,587,994,2525` | Ports the diagnostic may connect to. The allowlist stops the service being used as a port scanner; widen it for non-standard mail servers |
 | `MAIL_TRACE_DNS` | empty | DNS resolvers (comma separated, `:53` optional). Empty uses the built-in default `223.5.5.5 + 1.1.1.1` |
 | `SHUTDOWN_GRACE` | `90s` | How long in-flight diagnostics may finish after a stop signal. Match your process manager's timeout — supervisor kills at 10s by default |
 | `MAIL_TRACE_ALLOW_PRIVATE` | off | Allows internal targets and any port. **Internal deployments only** |

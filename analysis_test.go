@@ -77,3 +77,19 @@ func TestCheckDNSBLRejectsBadIP(t *testing.T) {
 		}
 	}
 }
+
+// TestImplicitTLSPorts 锁住「连上即 TLS」的端口集合。
+// 465 与 994 上服务器会立刻发起握手，按明文读 banner 只会读到握手字节；
+// 放开端口白名单却漏掉这一步，网易系依然测不了，只是失败得更难解释。
+func TestImplicitTLSPorts(t *testing.T) {
+	for _, p := range []int{465, 994} {
+		if !IsImplicitTLSPort(p) {
+			t.Errorf("端口 %d 应按隐式 TLS 处理", p)
+		}
+	}
+	for _, p := range []int{25, 587, 2525} {
+		if IsImplicitTLSPort(p) {
+			t.Errorf("端口 %d 不应按隐式 TLS 处理", p)
+		}
+	}
+}
