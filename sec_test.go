@@ -20,7 +20,7 @@ func TestSecurity(t *testing.T) {
 		cfg       Config
 		wantBlock bool
 	}{
-		{"正常配置", base(func(c *Config) { c.Host = "mail.complexmission.com"; c.Port = 465 }), false},
+		{"正常配置", base(func(c *Config) { c.Host = "example.com"; c.Port = 465 }), false},
 		{"内网直连 127.0.0.1", base(func(c *Config) { c.Host = "127.0.0.1" }), true},
 		{"内网 192.168", base(func(c *Config) { c.Host = "192.168.1.1" }), true},
 		{"云元数据 169.254.169.254", base(func(c *Config) { c.Host = "169.254.169.254" }), true},

@@ -1,0 +1,20 @@
+# 统一行尾。仓库里一律存 LF，检出时不做转换。
+# 不这么声明的话，Windows 上 clone 出来的 .go 会是 CRLF，
+# `gofmt -l` 会把每一个文件都列成「未格式化」，CI 直接全红。
+* text=auto eol=lf
+
+*.go      text eol=lf diff=golang
+*.html    text eol=lf diff=html
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.json    text eol=lf
+*.svg     text eol=lf
+*.sum     text eol=lf
+*.mod     text eol=lf
+Dockerfile text eol=lf
+
+*.jpg     binary
+*.png     binary
+*.ico     binary
+*.exe     binary

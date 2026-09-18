@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.local
+*.exe
+mail-trace
+dist/
+README.md
+LICENSE
+
+# 注意：docs/ 整个目录不能排除 —— docs/og.png 是 go:embed 的输入，
+# 排掉会让容器构建直接失败。只排除仓库里的截图。
+docs/*.jpg
+docs/*.jpeg
