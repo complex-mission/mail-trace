@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"strings"
 	"syscall"
@@ -112,7 +111,7 @@ var blockedNets = func() []*net.IPNet {
 // AllowPrivateTargets 由环境变量 MAIL_TRACE_ALLOW_PRIVATE=1 打开，默认关闭。
 // 只有在内网自部署、需要诊断内部邮件服务器时才应开启；
 // 公网部署开启它等于把服务变成对外的内网扫描器。
-var AllowPrivateTargets = os.Getenv("MAIL_TRACE_ALLOW_PRIVATE") == "1"
+var AllowPrivateTargets bool
 
 func IsBlockedIP(ip net.IP) bool {
 	if AllowPrivateTargets {

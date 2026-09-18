@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"crypto/tls"
 	"embed"
 	"encoding/base64"
@@ -20,6 +19,7 @@ import (
 	"net/textproto"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -362,30 +362,10 @@ var defaultDNSServers = []string{"223.5.5.5:53", "1.1.1.1:53"}
 // dnsServers 默认指向国内公共 DNS，用 MAIL_TRACE_DNS 覆盖（逗号分隔，可省略 :53）。
 // 这不只是延迟问题：Spamhaus 这类列表会拒绝来自公共解析器的查询并返回 127.255.255.x，
 // 所以默认配置下 DNSBL 那一项本身就是不可信的 —— 想要准确结论必须指向自建递归解析器。
-var dnsServers = func() []string {
-	raw := os.Getenv("MAIL_TRACE_DNS")
-	if raw == "" {
-		return defaultDNSServers
-	}
-	var out []string
-	for _, s := range strings.Split(raw, ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if _, _, err := net.SplitHostPort(s); err != nil {
-			s = net.JoinHostPort(s, "53")
-		}
-		out = append(out, s)
-	}
-	if len(out) == 0 {
-		return defaultDNSServers
-	}
-	return out
-}()
+var dnsServers = defaultDNSServers
 
 // UsingDefaultDNS 为真时，DNSBL 的「查询被拒」提示才需要提醒用户换解析器。
-var UsingDefaultDNS = os.Getenv("MAIL_TRACE_DNS") == ""
+var UsingDefaultDNS = true
 
 // dnsResolverHint 告诉用户「查询被拒」这件事是不是本服务自己的配置造成的。
 func dnsResolverHint(lang L) string {
@@ -1273,17 +1253,10 @@ func getTCPErrorTips(lang L, err error, host string, port int) []string {
 // 这里仍然不引入 html/template（理由同上），只在启动时做一次字节替换。
 const canonicalPlaceholder = "https://mail-trace.complexmission.com"
 
-var indexHTML, indexETag = func() ([]byte, string) {
-	b, err := templateFS.ReadFile("templates/index.html")
-	if err != nil {
-		panic("embed templates/index.html: " + err.Error())
-	}
-	if SiteURL != canonicalPlaceholder {
-		b = bytes.ReplaceAll(b, []byte(canonicalPlaceholder), []byte(SiteURL))
-	}
-	sum := sha256.Sum256(b)
-	return b, fmt.Sprintf("\"%x\"", sum[:8])
-}()
+var (
+	indexHTML []byte
+	indexETag string
+)
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
@@ -1815,9 +1788,44 @@ func rateLimitMiddleware(rl *RateLimiter, next http.HandlerFunc) http.HandlerFun
 // version 由构建时注入：go build -ldflags "-X main.version=v1.2.3"
 var version = "dev"
 
+// loadDotEnv 按顺序查找 .env：先进程的工作目录，再可执行文件所在目录。
+//
+// 只看工作目录是不够的。面板（宝塔的 Go 项目管理走 supervisor）和 systemd
+// 托管时，进程 CWD 常常不是项目目录，于是 .env 被静默跳过、服务以默认值启动——
+// 没有限流、没有可信代理，却不报任何错。这类故障很难从现象反推，
+// 所以这里既扩大查找范围，也把「加载了哪个文件 / 一个都没找到」写进日志。
+//
+// 已存在的环境变量优先：godotenv 不覆盖它们，面板里配的值会盖过 .env。
+func loadDotEnv() {
+	var candidates []string
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(wd, ".env"))
+	}
+	if exe, err := os.Executable(); err == nil {
+		if p := filepath.Join(filepath.Dir(exe), ".env"); len(candidates) == 0 || p != candidates[0] {
+			candidates = append(candidates, p)
+		}
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if err := godotenv.Load(p); err != nil {
+			log.Printf("警告: 读取 %s 失败: %v", p, err)
+			continue
+		}
+		log.Printf("已加载配置文件 %s", p)
+		return
+	}
+	log.Printf("未找到 .env（已查找: %s），配置全部取自环境变量或默认值",
+		strings.Join(candidates, "、"))
+}
+
 func main() {
-	// Load .env (ignore error if file doesn't exist)
-	godotenv.Load()
+	loadDotEnv()
+	// 必须在 loadDotEnv 之后：所有读环境变量的配置都在这里装配，
+	// 写成包级初始化会在 .env 被读进来之前就求值完（见 config.go）。
+	initConfig()
 
 	listen := "127.0.0.1:9013"
 	if v := os.Getenv("LISTEN"); v != "" {

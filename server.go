@@ -21,30 +21,7 @@ import (
 // 所有用户共用代理那一个 IP 的桶（README 里的 nginx 配置正是这种部署）。
 // 两头都错，所以交给部署方用 MAIL_TRACE_TRUSTED_PROXIES 显式声明代理网段，
 // 逗号分隔，接受 CIDR 或单个 IP。
-var trustedProxies = func() []*net.IPNet {
-	raw := os.Getenv("MAIL_TRACE_TRUSTED_PROXIES")
-	var out []*net.IPNet
-	for _, part := range strings.Split(raw, ",") {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-		if _, n, err := net.ParseCIDR(part); err == nil {
-			out = append(out, n)
-			continue
-		}
-		if ip := net.ParseIP(part); ip != nil {
-			bits := 32
-			if ip.To4() == nil {
-				bits = 128
-			}
-			out = append(out, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
-			continue
-		}
-		log.Printf("警告: MAIL_TRACE_TRUSTED_PROXIES 中的 %q 不是合法的 IP 或 CIDR，已忽略", part)
-	}
-	return out
-}()
+var trustedProxies []*net.IPNet
 
 func isTrustedProxy(ip net.IP) bool {
 	if ip == nil {
@@ -174,18 +151,9 @@ func withLogging(next http.HandlerFunc) http.HandlerFunc {
 // 但进程管理器往往等不了那么久 —— supervisor 的 stopwaitsecs 默认 10 秒，
 // 超时就 SIGKILL，优雅退出等于没有。所以放开成可配置，
 // 让它能和所在平台的停止超时对齐（设 0 表示不等待，立即关闭）。
-var ShutdownGrace = func() time.Duration {
-	v := os.Getenv("SHUTDOWN_GRACE")
-	if v == "" {
-		return 90 * time.Second
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil || d < 0 {
-		log.Printf("警告: SHUTDOWN_GRACE=%q 不是合法时长，用默认 90s", v)
-		return 90 * time.Second
-	}
-	return d
-}()
+var ShutdownGrace = defaultShutdownGrace
+
+const defaultShutdownGrace = 90 * time.Second
 
 func envInt(key string, def int) int {
 	if v := os.Getenv(key); v != "" {

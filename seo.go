@@ -5,8 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 )
 
@@ -30,12 +28,9 @@ var ogPNG, ogPNGETag = func() ([]byte, string) {
 }()
 
 // SiteURL 决定 canonical / sitemap / OG 里写什么域名，部署时用 SITE_URL 覆盖。
-var SiteURL = func() string {
-	if v := os.Getenv("SITE_URL"); v != "" {
-		return strings.TrimSuffix(v, "/")
-	}
-	return "https://mail-trace.complexmission.com"
-}()
+const defaultSiteURL = "https://mail-trace.complexmission.com"
+
+var SiteURL = defaultSiteURL
 
 const RepoURL = "https://github.com/complex-mission/mail-trace"
 
