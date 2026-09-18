@@ -449,6 +449,15 @@ var dnsblZones = []dnsblZone{
 func CheckDNSBL(ctx context.Context, ip string) []DNSBLResult {
 	rev := reverseIP(ip)
 	results := make([]DNSBLResult, len(dnsblZones))
+	if rev == "" {
+		// 构造不出查询名。发畸形查询只会全部无应答，在界面上伪装成「未列入」——
+		// 显式报错才不会让用户拿着一个假的「干净」结论去排查。
+		for i, z := range dnsblZones {
+			results[i] = DNSBLResult{Blacklist: z.label, Zone: z.host, Advisory: z.advisory,
+				Kind: dnsblError, Error: "无法解析发信 IP / unparsable sending IP"}
+		}
+		return results
+	}
 	var wg sync.WaitGroup
 
 	for i, z := range dnsblZones {

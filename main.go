@@ -528,12 +528,30 @@ func resolveDNSContext(ctx context.Context, domain string) *DNSResult {
 	return r
 }
 
+// reverseIP 生成 DNSBL 查询用的反转地址（RFC 5782）：IPv4 是四段倒序，
+// IPv6 是 32 个半字节倒序。非法 IP 返回空串，调用方据此报错而不是发一个畸形查询——
+// 畸形查询会全部无应答，在界面上伪装成「未列入任何黑名单」。
 func reverseIP(ip string) string {
-	parts := strings.Split(ip, ".")
-	if len(parts) != 4 {
-		return ip
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ""
 	}
-	return fmt.Sprintf("%s.%s.%s.%s", parts[3], parts[2], parts[1], parts[0])
+	if v4 := parsed.To4(); v4 != nil {
+		return fmt.Sprintf("%d.%d.%d.%d", v4[3], v4[2], v4[1], v4[0])
+	}
+	v6 := parsed.To16()
+	if v6 == nil {
+		return ""
+	}
+	const hexDigits = "0123456789abcdef"
+	buf := make([]byte, 0, 63)
+	for i := len(v6) - 1; i >= 0; i-- {
+		buf = append(buf, hexDigits[v6[i]&0x0f], '.', hexDigits[v6[i]>>4])
+		if i > 0 {
+			buf = append(buf, '.')
+		}
+	}
+	return string(buf)
 }
 
 func validateSPF(spf string) bool {
@@ -541,20 +559,24 @@ func validateSPF(spf string) bool {
 	return strings.HasPrefix(spfLower, "v=spf1")
 }
 
+// extractDMARCPolicy 取 p= 标签的值。必须按 ';' 切分再精确比较标签名：
+// 子串匹配会把 sp=reject（子域策略）认成 p=reject，于是一个 p=none、
+// 完全没有拦截保护的域名会被报成「Reject」，准入检查也跟着误判为通过。
 func extractDMARCPolicy(dmarc string) string {
-	lower := strings.ToLower(dmarc)
-	for _, p := range []string{"p=reject", "p=quarantine", "p=none"} {
-		if idx := strings.Index(lower, p); idx >= 0 {
-			// Extract value after "p=", stop at ';' or end
-			valStart := idx + 2
-			valEnd := strings.Index(dmarc[valStart:], ";")
-			if valEnd < 0 {
-				valEnd = len(dmarc) - valStart
-			}
-			val := strings.TrimSpace(dmarc[valStart : valStart+valEnd])
-			pol := strings.ToUpper(val[:1]) + val[1:]
-			return pol
+	for _, part := range strings.Split(dmarc, ";") {
+		tag, val, ok := strings.Cut(part, "=")
+		if !ok || !strings.EqualFold(strings.TrimSpace(tag), "p") {
+			continue
 		}
+		switch strings.ToLower(strings.TrimSpace(val)) {
+		case "reject":
+			return "Reject"
+		case "quarantine":
+			return "Quarantine"
+		case "none":
+			return "None"
+		}
+		return ""
 	}
 	return ""
 }
@@ -590,10 +612,18 @@ func getTLSCertInfo(conn *tls.ConnectionState) *TLSCertInfo {
 
 type StepWriter func(Step)
 
-func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
+func testSMTPStream(cfg Config, rawEmit StepWriter) *TestResult {
 	lang := L(cfg.Lang)
 	result := &TestResult{DNS: make(map[string]*DNSResult)}
 	start := time.Now()
+
+	// 每个步骤在流给调用方的同时记进 result.Steps。SSE 的 done 事件、JSON 端点、
+	// 以及本函数末尾的失败汇总都只认 result.Steps —— 只调 emit 会让它们全部拿到空列表，
+	// 表现为「某一步 fail 了，总结却显示全部通过」。
+	emit := func(s Step) {
+		result.Steps = append(result.Steps, s)
+		rawEmit(s)
+	}
 
 	port := cfg.Port
 	useSSL := (port == 465)
@@ -602,9 +632,6 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 	// ── Step 1: DNS resolution of SMTP host ──
 	dnsStart := time.Now()
 	ips, err := net.LookupHost(host)
-	if err == nil && len(ips) > 0 {
-		result.ServerIP = ips[0]
-	}
 	emit(Step{
 		Name:   lang.T("DNS 解析", "DNS Resolution"),
 		Status: boolToStatus(err == nil),
@@ -640,6 +667,14 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		Detail: lang.F("已连接 %s:%d (%dms)", "connected to %s:%d (%dms)", host, port, connMs),
 		Timing: connMs,
 	})
+
+	// 后面的 PTR / SPF / DNSBL 全按这个 IP 判定，所以必须取「真正建连的那一个」，
+	// 而不是 A 记录的第一条：多 A 记录、DNS 轮询或走 IPv6 时两者可能不是同一台机器。
+	if ra, ok := conn.RemoteAddr().(*net.TCPAddr); ok && ra.IP != nil {
+		result.ServerIP = ra.IP.String()
+	} else if len(ips) > 0 {
+		result.ServerIP = ips[0]
+	}
 
 	// ── Step 3: Banner ──
 	bannerStart := time.Now()
@@ -694,7 +729,9 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 	hasStartTLS := strings.Contains(strings.ToUpper(ehloMsg), "STARTTLS")
 
 	// ── Step 5: STARTTLS (for port 587/25) ──
+	// tlsActive 决定后面敢不敢发认证：AUTH LOGIN/PLAIN 只是 base64，不是加密。
 	var tlsState *tls.ConnectionState
+	tlsActive := false
 	if port != 465 && hasStartTLS {
 		tlsStart := time.Now()
 		tlsCode, tlsMsg, _ := conn.SendCommand("STARTTLS")
@@ -728,7 +765,12 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 				}(),
 			})
 			if tlsOk {
-				conn.SendCommand("EHLO " + getHostname())
+				tlsActive = true
+				// 加密后必须重新读一遍能力集：明文阶段的 EHLO 通常不广告 AUTH，
+				// 沿用那一份会让「服务器扩展」里缺掉用户最关心的一项。
+				if code, msg, err := conn.SendCommand("EHLO " + getHostname()); err == nil && code == 250 {
+					result.Extensions = parseEHLOExtensions(msg)
+				}
 			}
 		} else {
 			tlsMs := time.Since(tlsStart).Milliseconds()
@@ -743,6 +785,7 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 		}
 	} else if port == 465 {
 		// SSL already active, get cert info
+		tlsActive = true
 		if tlsConn, ok := conn.conn.(*tls.Conn); ok {
 			st := tlsConn.ConnectionState()
 			tlsState = &st
@@ -766,6 +809,36 @@ func testSMTPStream(cfg Config, emit StepWriter) *TestResult {
 			Detail: lang.T("服务器未提供 STARTTLS", "the server does not advertise STARTTLS"),
 			Tips:   []string{lang.T("邮件将以明文传输，存在安全风险", "Mail would be sent in cleartext, which is a security risk."), lang.T("建议使用 465 (SSL) 或 587 (STARTTLS) 端口", "Prefer port 465 (SSL) or 587 (STARTTLS).")},
 		})
+	}
+
+	// 认证前先确认信道已加密。AUTH LOGIN / PLAIN 只是 base64 编码，
+	// 在明文连接上发送等于把密码交给链路上的任何人 —— 一个承诺「凭据不落盘」的
+	// 工具更不该是泄露密码的那一环，所以这里宁可停下来报错。
+	if !tlsActive && AllowPrivateTargets {
+		// 内网自部署常见无 TLS 的测试服务器（MailHog 等）。这个开关本就声明「仅限内网」，
+		// 所以降级为警告而不是中止，公网部署仍走下面的硬中止。
+		emit(Step{
+			Name:   lang.T("SMTP 认证", "SMTP Authentication"),
+			Status: "warn",
+			Detail: lang.T("信道未加密，凭据将以 base64 明文发送（已由 MAIL_TRACE_ALLOW_PRIVATE 放行）", "the channel is not encrypted; credentials will be sent as cleartext base64 (permitted by MAIL_TRACE_ALLOW_PRIVATE)"),
+			Tips:   []string{lang.T("仅内网诊断可接受；请勿在公网链路上这样测试真实密码", "Acceptable for internal diagnostics only - never test a real password this way over the public internet.")},
+		})
+	} else if !tlsActive {
+		emit(Step{
+			Name:   lang.T("SMTP 认证", "SMTP Authentication"),
+			Status: "fail",
+			Detail: lang.T("信道未加密，已中止认证", "the channel is not encrypted; authentication was aborted"),
+			Tips: []string{
+				lang.T("AUTH LOGIN / PLAIN 只是 base64 编码而非加密，明文链路上发送密码等同泄露", "AUTH LOGIN / PLAIN is base64, not encryption - sending the password over a cleartext link discloses it."),
+				lang.T("改用 465 端口（隐式 SSL），或确认服务器在 587 上支持 STARTTLS", "Use port 465 (implicit SSL), or make sure the server offers STARTTLS on 587."),
+				lang.T("若 STARTTLS 是因证书问题握手失败，可勾选「跳过 TLS 证书校验」后重试", "If the STARTTLS handshake failed over the certificate, retry with \"Skip TLS certificate verification\" enabled."),
+			},
+		})
+		conn.SendCommand("QUIT")
+		conn.Close()
+		result.Summary = lang.T("信道未加密，已中止认证以免明文发送密码", "aborted before authentication: the channel is not encrypted")
+		result.TotalMs = time.Since(start).Milliseconds()
+		return result
 	}
 
 	// ── Step 6: AUTH ──
@@ -1118,7 +1191,6 @@ func handleTestSSE(w http.ResponseWriter, r *http.Request) {
 	result := &TestResult{DNS: make(map[string]*DNSResult)}
 
 	emit := func(step Step) {
-		result.Steps = append(result.Steps, step)
 		data, _ := json.Marshal(SSEEvent{Type: "step", Data: step})
 		fmt.Fprintf(w, "data: %s\n\n", data)
 		flusher.Flush()
@@ -1465,10 +1537,8 @@ func handleTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	steps := make([]Step, 0)
-	result := testSMTPStream(cfg, func(s Step) {
-		steps = append(steps, s)
-	})
+	// 步骤由 testSMTPStream 自己记进 result.Steps，这里不需要额外收集
+	result := testSMTPStream(cfg, func(Step) {})
 
 	fromDomain := cfg.From[strings.Index(cfg.From, "@")+1:]
 	toDomain := cfg.To[strings.Index(cfg.To, "@")+1:]
